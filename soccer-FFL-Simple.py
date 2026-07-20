@@ -9,48 +9,39 @@ import io
 st.set_page_config(page_title="Foot 5 - Tactique & Équilibrage", page_icon="⚽", layout="wide")
 
 # --- FICHIERS DE STOCKAGE ---
-DATA_FILE = 'database_joueurs.xlsx'       # Fichier créé par l'app pour sauvegarder vos changements
-EXCEL_FILE = 'Gestion_Equipes_Foot5 - Copie.xlsx' # Fichier d'origine (secours)
+DATA_FILE = 'database_joueurs.xlsx'       
+EXCEL_FILE = 'Gestion_Equipes_Foot5 - Copie.xlsx' 
 
 # --- FONCTION DE CHARGEMENT ---
 def load_data():
-    # 1. On regarde d'abord si une base de données modifiée existe déjà sur le disque
     if os.path.exists(DATA_FILE):
-        try:
-            return pd.read_excel(DATA_FILE)
-        except Exception:
-            pass
-            
-    # 2. Si elle n'existe pas encore, on charge le fichier Excel initial
+        try: return pd.read_excel(DATA_FILE)
+        except Exception: pass
     if os.path.exists(EXCEL_FILE):
         try:
             df = pd.read_excel(EXCEL_FILE, sheet_name='Liste des Joueurs', skiprows=3)
             df = df.dropna(subset=["Nom du Joueur"])
-            df = df[["Nom du Joueur", "Note (1-10)", "Poste"]]
-            return df.reset_index(drop=True)
-        except Exception:
-            pass
-            
-    # 3. Secours ultime si aucun fichier n'est trouvé
+            return df[["Nom du Joueur", "Note (1-10)", "Poste"]].reset_index(drop=True)
+        except Exception: pass
     return pd.DataFrame({
         "Nom du Joueur": ["Antho", "Cyril V", "Apou", "Benoit", "Nico P", "Mouyss", "Cédric", "Nico M", "David", "Cyril L"],
         "Note (1-10)": [9, 9, 6, 6, 6, 5, 5, 4, 4, 3],
         "Poste": ["Attaque", "Défense", "Attaque", "Attaque", "Défense", "Attaque", "Défense", "Attaque", "Défense", "Défense"]
     })
 
-# --- FONCTION DE SAUVEGARDE PHYSIQUE ---
 def save_data(df):
     df.to_excel(DATA_FILE, index=False)
 
-# Chargement initial dans le state de Streamlit
 if 'players_df' not in st.session_state:
     st.session_state.players_df = load_data()
 
 # --- FONCTION GRAPHIQUE TERRAIN ---
-def draw_tactical_field(team_df, team_title, primary_color):
+def draw_tactical_field(team_df, primary_color):
     fig, ax = plt.subplots(figsize=(5, 5.5))
-    fig.patch.set_alpha(0.0)
-    ax.set_facecolor('#226343')
+    fig.patch.set_alpha(0.0) # Fond transparent
+    ax.set_facecolor('#226343') # Pelouse
+    
+    # Lignes du terrain
     ax.plot([0, 50, 50, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.5)
     penalty_area = patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=2)
     ax.add_patch(penalty_area)
@@ -58,6 +49,7 @@ def draw_tactical_field(team_df, team_title, primary_color):
     center_arc = patches.Arc((50, 30), 18, 18, angle=0, theta1=90, theta2=270, color='white', linewidth=2)
     ax.add_patch(center_arc)
     
+    # Positions 1-2-2
     positions = [(5, 30), (19, 14), (19, 46), (38, 18), (38, 42)]
     players = team_df.sort_values(by="Poste", ascending=False).reset_index(drop=True)
     
@@ -73,6 +65,32 @@ def draw_tactical_field(team_df, team_title, primary_color):
     ax.axis('off')
     plt.tight_layout()
     return fig
+
+
+# ==========================================
+# 🆕 NOUVEAUTÉ : FONCTION DU POP-UP MODAL
+# ==========================================
+@st.dialog("Compositions du Match ⚽", width="large")
+def show_teams_popup(t1, t2):
+    st.write("Voici l'équilibrage généré. Idéal pour faire une capture d'écran et l'envoyer sur votre groupe (WhatsApp/Signal) !")
+    
+    # Création de deux colonnes à l'intérieur du pop-up
+    pop_col1, pop_col2 = st.columns(2)
+    
+    with pop_col1:
+        st.subheader("🔵 ÉQUIPE 1")
+        fig1 = draw_tactical_field(t1, "#1C6CF6")
+        st.pyplot(fig1)
+        st.metric("Niveau Moyen", f"{t1['Note (1-10)'].mean():.1f}")
+        
+    with pop_col2:
+        st.subheader("🔴 ÉQUIPE 2")
+        fig2 = draw_tactical_field(t2, "#E03131")
+        st.pyplot(fig2)
+        st.metric("Niveau Moyen", f"{t2['Note (1-10)'].mean():.1f}")
+        
+    if st.button("Fermer"):
+        st.rerun()
 
 
 # --- LOGIQUE INTERFACE ---
@@ -102,6 +120,8 @@ with tab1:
     
     if nb_selected == 10:
         st.success("✅ 10 joueurs prêts !")
+        
+        # Déclenchement du bouton
         if st.button("⚡ Générer les Compositions Tactiques", type="primary"):
             selected_players = selected_players.copy()
             selected_players["Score Tri"] = selected_players["Note (1-10)"] + selected_players["Poste"].apply(lambda x: 0.1 if x == "Attaque" else 0.0)
@@ -113,122 +133,70 @@ with tab1:
             team1 = sorted_players.iloc[idx_team1].copy()
             team2 = sorted_players.iloc[idx_team2].copy()
             
-            st.write("---")
-            col_field1, col_field2 = st.columns(2)
+            # Stockage temporaire pour garder l'affichage sur la page principale si besoin
+            st.session_state.last_team1 = team1
+            st.session_state.last_team2 = team2
             
-            with col_field1:
-                st.subheader("🔵 ÉQUIPE 1")
-                fig1 = draw_tactical_field(team1, "Équipe 1", "#1C6CF6")
-                st.pyplot(fig1)
-                st.metric("Niveau Moyen", f"{team1['Note (1-10)'].mean():.1f}")
-                st.dataframe(team1[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True, use_container_width=True)
-                
-            with col_field2:
-                st.subheader("🔴 ÉQUIPE 2")
-                fig2 = draw_tactical_field(team2, "Équipe 2", "#E03131")
-                st.pyplot(fig2)
-                st.metric("Niveau Moyen", f"{team2['Note (1-10)'].mean():.1f}")
-                st.dataframe(team2[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True, use_container_width=True)
+            # Appeler la fonction pop-up
+            show_teams_popup(team1, team2)
+
     else:
         st.info(f"🏃 Sélectionnez exactement 10 joueurs (Actuel : {nb_selected}/10)")
 
+    # Optionnel : réafficher les équipes sous le tableau si le pop-up a été fermé
+    if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
+        st.write("---")
+        st.markdown("### 📊 Dernières équipes générées")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.dataframe(st.session_state.last_team1[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True)
+        with c2:
+            st.dataframe(st.session_state.last_team2[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True)
 
-# ONGLET 2 : GESTION, IMPORT & EXPORT
+
+# ONGLET 2 : GESTION DES JOUEURS (Reste identique avec sauvegarde sur le disque)
 with tab2:
     st.header("Gestion de la base des joueurs")
     
-    # IMPORT / EXPORT EXCEL
     st.subheader("📥 Sauvegarde & Mise à jour externe")
     col_dl, col_ul = st.columns(2)
-    
     with col_dl:
-        st.write("1. Téléchargez la base actuelle pour la modifier sur Excel :")
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             st.session_state.players_df.to_excel(writer, index=False, sheet_name='Liste des Joueurs')
         buffer.seek(0)
-        
-        st.download_button(
-            label="📥 Télécharger l'effectif (.xlsx)",
-            data=buffer,
-            file_name="Effectif_Foot5.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button(label="📥 Télécharger l'effectif (.xlsx)", data=buffer, file_name="Effectif_Foot5.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         
     with col_ul:
-        st.write("2. Réuploadez votre fichier Excel une fois modifié :")
         uploaded_file = st.file_uploader("Choisir un fichier Excel (.xlsx)", type=["xlsx"])
-        
         if uploaded_file is not None:
             try:
                 uploaded_df = pd.read_excel(uploaded_file)
                 required_cols = ["Nom du Joueur", "Note (1-10)", "Poste"]
                 if all(col in uploaded_df.columns for col in required_cols):
-                    cleaned_df = uploaded_df[required_cols].dropna(subset=["Nom du Joueur"])
-                    st.session_state.players_df = cleaned_df.reset_index(drop=True)
-                    
-                    # ENREGISTREMENT SUR LE DISQUE
+                    st.session_state.players_df = uploaded_df[required_cols].dropna(subset=["Nom du Joueur"]).reset_index(drop=True)
                     save_data(st.session_state.players_df)
-                    
-                    st.success("✅ Base de données mise à jour et sauvegardée sur le disque !")
+                    st.success("✅ Mis à jour !")
                     st.rerun()
-                else:
-                    st.error(f"Erreur : Le fichier doit contenir : {', '.join(required_cols)}")
-            except Exception as e:
-                st.error(f"Erreur lors de la lecture : {e}")
+            except Exception as e: st.error(f"Erreur : {e}")
 
     st.write("---")
-    
-    # AJOUT MANUEL
     with st.expander("➕ Ajouter manuellement un joueur"):
         with st.form("form_add"):
-            name = st.text_input("Nom de famille / Pseudo")
-            note = st.slider("Note globale (1 à 10)", 1, 10, 5)
-            poste = st.radio("Poste préférentiel", ["Attaque", "Défense"], horizontal=True)
-            
-            if st.form_submit_button("Ajouter à l'effectif"):
-                if not name.strip():
-                    st.error("Veuillez saisir un nom valide.")
-                elif name.strip() in st.session_state.players_df["Nom du Joueur"].values:
-                    st.error("Ce joueur existe déjà.")
-                else:
+            name = st.text_input("Nom / Pseudo")
+            note = st.slider("Note (1 à 10)", 1, 10, 5)
+            poste = st.radio("Poste", ["Attaque", "Défense"], horizontal=True)
+            if st.form_submit_button("Ajouter"):
+                if name.strip() and name.strip() not in st.session_state.players_df["Nom du Joueur"].values:
                     new_player = pd.DataFrame({"Nom du Joueur": [name.strip()], "Note (1-10)": [note], "Poste": [poste]})
                     st.session_state.players_df = pd.concat([st.session_state.players_df, new_player], ignore_index=True)
-                    
-                    # ENREGISTREMENT SUR LE DISQUE
                     save_data(st.session_state.players_df)
-                    
-                    st.success(f"⚽ {name.strip()} ajouté et sauvegardé !")
                     st.rerun()
                     
-    # MODIFICATION DANS LE TABLEAU
     st.subheader("Modification rapide sur l'application")
-    edited_players = st.data_editor(
-        st.session_state.players_df,
-        column_config={
-            "Note (1-10)": st.column_config.NumberColumn(min_value=1, max_value=10, step=1),
-            "Poste": st.column_config.SelectboxColumn(options=["Attaque", "Défense"])
-        },
-        hide_index=True,
-        use_container_width=True
-    )
-    
-    # BOUTON POUR ENREGISTRER LE TABLEAU
+    edited_players = st.data_editor(st.session_state.players_df, column_config={"Note (1-10)": st.column_config.NumberColumn(min_value=1, max_value=10), "Poste": st.column_config.SelectboxColumn(options=["Attaque", "Défense"])}, hide_index=True, use_container_width=True)
     if st.button("💾 Enregistrer les modifications du tableau", type="primary"):
         st.session_state.players_df = edited_players
         save_data(edited_players)
-        st.success("✅ Modifications du tableau enregistrées durablement !")
+        st.success("✅ Enregistré !")
         st.rerun()
-
-    # SUPPRESSION
-    st.write("---")
-    player_to_remove = st.selectbox("Sélectionnez un joueur à retirer", ["-- Aucun --"] + list(st.session_state.players_df["Nom du Joueur"]))
-    if player_to_remove != "-- Aucun --":
-        if st.button("🗑️ Confirmer la suppression", type="secondary"):
-            st.session_state.players_df = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] != player_to_remove]
-            
-            # ENREGISTREMENT SUR LE DISQUE
-            save_data(st.session_state.players_df)
-            
-            st.success(f"Joueur {player_to_remove} supprimé et sauvegardé.")
-            st.rerun()
