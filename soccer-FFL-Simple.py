@@ -8,22 +8,27 @@ import io
 # Configuration de la page Streamlit
 st.set_page_config(page_title="Soccer FFL Kompo", page_icon="⚽", layout="wide")
 
-# 📳 CORRECTIF MOBILE TRÈS STRICT (Force les 2 colonnes en mode portrait)
+# 📳 FORCE LE MODE GRILLE (3 COLONNES INDÉFORMABLES SUR MOBILE)
 st.markdown(
     """
     <style>
     @media (max-width: 768px) {
-        /* Force la ligne à rester à l'horizontale */
+        /* Force le conteneur à devenir une grille de 3 colonnes égales */
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) {
-            flex-direction: row !important;
-            display: flex !important;
-            gap: 10px !important;
+            display: grid !important;
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 8px !important;
         }
-        /* Force chaque colonne à prendre exactement la moitié de l'écran */
-        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) div[data-testid="stColumn"] {
-            width: 50% !important;
-            flex: 1 1 50% !important;
+        /* Annule les règles mobiles par défaut de Streamlit qui écrasent les colonnes */
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) > div[data-testid="stColumn"] {
+            width: 100% !important;
+            max-width: 100% !important;
             min-width: 0 !important;
+            flex: none !important;
+        }
+        /* Légère réduction de la police pour que les longs prénoms ne coupent pas */
+        div[data-testid="stCheckbox"] label {
+            font-size: 13px !important;
         }
     }
     </style>
@@ -158,24 +163,32 @@ with tab1:
     df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
     selected_names = []
     
-    # Affichage en grille forcée 2 par 2
-    for i in range(0, len(df_sorted), 2):
-        cols = st.columns(2)
+    # Nouvelle boucle configurée pour 3 colonnes par ligne
+    for i in range(0, len(df_sorted), 3):
+        cols = st.columns(3)
         
-        # Joueur Gauche
+        # Colonne 1 (Gauche)
         row1 = df_sorted.iloc[i]
         name1 = row1["Nom du Joueur"]
         with cols[0]:
             if st.checkbox(name1, key=f"select_{name1}"):
                 selected_names.append(name1)
                 
-        # Joueur Droite
+        # Colonne 2 (Milieu)
         if i + 1 < len(df_sorted):
             row2 = df_sorted.iloc[i + 1]
             name2 = row2["Nom du Joueur"]
             with cols[1]:
                 if st.checkbox(name2, key=f"select_{name2}"):
                     selected_names.append(name2)
+                    
+        # Colonne 3 (Droite)
+        if i + 2 < len(df_sorted):
+            row3 = df_sorted.iloc[i + 2]
+            name3 = row3["Nom du Joueur"]
+            with cols[2]:
+                if st.checkbox(name3, key=f"select_{name3}"):
+                    selected_names.append(name3)
                 
     selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)]
     nb_selected = len(selected_players)
