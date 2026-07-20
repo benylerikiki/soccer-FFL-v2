@@ -158,23 +158,27 @@ tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
 # ONGLET 1 : EQUILIBRAGE
 with tab1:
     st.subheader("Sélection des présents")
-    st.write("Cochez les 10 joueurs du jour :")
     
+    # Étape 1 : On prépare la liste complète triée
     df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
+    
+    # Création d'un conteneur vide tout en haut pour y injecter le compteur dynamique après la boucle
+    counter_placeholder = st.empty()
+    
     selected_names = []
     
-    # Nouvelle boucle configurée pour 3 colonnes par ligne
+    # Affichage en grille de 3 colonnes par ligne
     for i in range(0, len(df_sorted), 3):
         cols = st.columns(3)
         
-        # Colonne 1 (Gauche)
+        # Colonne 1
         row1 = df_sorted.iloc[i]
         name1 = row1["Nom du Joueur"]
         with cols[0]:
             if st.checkbox(name1, key=f"select_{name1}"):
                 selected_names.append(name1)
                 
-        # Colonne 2 (Milieu)
+        # Colonne 2
         if i + 1 < len(df_sorted):
             row2 = df_sorted.iloc[i + 1]
             name2 = row2["Nom du Joueur"]
@@ -182,7 +186,7 @@ with tab1:
                 if st.checkbox(name2, key=f"select_{name2}"):
                     selected_names.append(name2)
                     
-        # Colonne 3 (Droite)
+        # Colonne 3
         if i + 2 < len(df_sorted):
             row3 = df_sorted.iloc[i + 2]
             name3 = row3["Nom du Joueur"]
@@ -193,11 +197,18 @@ with tab1:
     selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)]
     nb_selected = len(selected_players)
     
+    # Étape 2 : On met à jour le compteur dynamique TOUT EN HAUT de la page
+    if nb_selected == 10:
+        counter_placeholder.success("✅ 10 joueurs sélectionnés ! Prêts à générer.")
+    elif nb_selected > 10:
+        counter_placeholder.error(f"⚠️ Trop de joueurs sélectionnés ({nb_selected}/10). Veuillez en décocher {nb_selected - 10} !")
+    else:
+        counter_placeholder.info(f"🏃 Joueurs sélectionnés : {nb_selected} / 10")
+        
     st.write("---")
     
+    # Zone de bouton d'action sous la grille de sélection
     if nb_selected == 10:
-        st.success("✅ 10 joueurs sélectionnés ! Prêts à générer.")
-        
         if st.button("⚡ Générer les Compositions Tactiques", type="primary"):
             selected_players = selected_players.copy()
             selected_players["Score Tri"] = selected_players["Note (1-10)"] + selected_players["Poste"].apply(lambda x: 0.1 if x == "Attaque" else 0.0)
@@ -213,11 +224,6 @@ with tab1:
             st.session_state.last_team2 = team2
             
             show_teams_popup(team1, team2)
-            
-    elif nb_selected > 10:
-        st.error(f"⚠️ Trop de joueurs sélectionnés ({nb_selected}/10). Veuillez en décocher {nb_selected - 10} !")
-    else:
-        st.info(f"🏃 Sélectionnez exactement 10 joueurs (Actuel : {nb_selected}/10)")
 
     if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
         st.write("---")
