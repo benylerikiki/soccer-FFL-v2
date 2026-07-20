@@ -140,28 +140,39 @@ with tab1:
     st.subheader("Sélection des présents")
     st.write("Cochez les 10 joueurs du jour (triés par ordre alphabétique) :")
     
-    # 🆕 NOUVELLE MÉTHODE : Grille de cases à cocher (Anti-clavier mobile)
-    # Tri alphabétique des joueurs pour s'y retrouver facilement
+    # Tri alphabétique des joueurs
     df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
     
     selected_names = []
-    cols = st.columns(2) # Crée 2 colonnes adaptées aux écrans de smartphones
     
-    for idx, row in df_sorted.iterrows():
-        name = row["Nom du Joueur"]
-        poste_short = "A" if row["Poste"] == "Attaque" else "D"
-        label = f"{name} ({poste_short} - {row['Note (1-10)']}/10)"
+    # Affichage strict 2 par 2 par ligne (Grid de lignes)
+    for i in range(0, len(df_sorted), 2):
+        cols = st.columns(2) # Crée une nouvelle ligne de 2 colonnes
         
-        with cols[idx % 2]: # Alterne les lignes sur les 2 colonnes
-            if st.checkbox(label, key=f"select_{name}"):
-                selected_names.append(name)
+        # Premier joueur (colonne de gauche)
+        row1 = df_sorted.iloc[i]
+        name1 = row1["Nom du Joueur"]
+        poste1 = "Attaquant" if row1["Poste"] == "Attaque" else "Défenseur"
+        label1 = f"{name1} ({poste1} - {row1['Note (1-10)']}/10)"
+        with cols[0]:
+            if st.checkbox(label1, key=f"select_{name1}"):
+                selected_names.append(name1)
+                
+        # Deuxième joueur (colonne de droite, si existant dans la liste)
+        if i + 1 < len(df_sorted):
+            row2 = df_sorted.iloc[i + 1]
+            name2 = row2["Nom du Joueur"]
+            poste2 = "Attaquant" if row2["Poste"] == "Attaque" else "Défenseur"
+            label2 = f"{name2} ({poste2} - {row2['Note (1-10)']}/10)"
+            with cols[1]:
+                if st.checkbox(label2, key=f"select_{name2}"):
+                    selected_names.append(name2)
                 
     selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)]
     nb_selected = len(selected_players)
     
     st.write("---")
     
-    # Gestion des messages de restriction selon le nombre exact de cochés
     if nb_selected == 10:
         st.success("✅ 10 joueurs sélectionnés ! Prêts à générer.")
         
