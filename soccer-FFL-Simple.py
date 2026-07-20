@@ -8,16 +8,19 @@ import io
 # Configuration de la page Streamlit
 st.set_page_config(page_title="Soccer FFL Kompo", page_icon="⚽", layout="wide")
 
-# 📳 STYLE CSS : Force l'affichage sur 2 colonnes sur mobile portrait (uniquement pour les cases à cocher)
+# 📳 CORRECTIF MOBILE TRÈS STRICT (Force les 2 colonnes en mode portrait)
 st.markdown(
     """
     <style>
     @media (max-width: 768px) {
+        /* Force la ligne à rester à l'horizontale */
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) {
             flex-direction: row !important;
+            display: flex !important;
             gap: 10px !important;
         }
-        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) div[data-testid="column"] {
+        /* Force chaque colonne à prendre exactement la moitié de l'écran */
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) div[data-testid="stColumn"] {
             width: 50% !important;
             flex: 1 1 50% !important;
             min-width: 0 !important;
@@ -150,23 +153,23 @@ tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
 # ONGLET 1 : EQUILIBRAGE
 with tab1:
     st.subheader("Sélection des présents")
-    st.write("Cochez les 10 joueurs du jour (triés par ordre alphabétique) :")
+    st.write("Cochez les 10 joueurs du jour :")
     
     df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
     selected_names = []
     
-    # Affichage épuré strict 2 par 2 par ligne (Bloqué sur 2 colonnes grâce au CSS)
+    # Affichage en grille forcée 2 par 2
     for i in range(0, len(df_sorted), 2):
         cols = st.columns(2)
         
-        # Premier joueur (gauche)
+        # Joueur Gauche
         row1 = df_sorted.iloc[i]
         name1 = row1["Nom du Joueur"]
         with cols[0]:
             if st.checkbox(name1, key=f"select_{name1}"):
                 selected_names.append(name1)
                 
-        # Deuxième joueur (droite)
+        # Joueur Droite
         if i + 1 < len(df_sorted):
             row2 = df_sorted.iloc[i + 1]
             name2 = row2["Nom du Joueur"]
