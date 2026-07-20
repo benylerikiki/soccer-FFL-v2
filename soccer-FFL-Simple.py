@@ -109,33 +109,33 @@ def show_teams_popup(t1, t2):
 
 
 # --- LOGIQUE INTERFACE ---
-# 🆕 Remplacement du gros st.title par un st.header plus petit et mise à jour du texte
 st.header("⚽ Soccer FFL Kompo")
 
 tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
 
 # ONGLET 1 : EQUILIBRAGE
 with tab1:
-    st.header("Sélection des présents")
-    pool_df = st.session_state.players_df.copy()
-    pool_df.insert(0, "Présent ?", False)
+    st.subheader("Sélection des présents")
     
-    edited_df = st.data_editor(
-        pool_df,
-        column_config={
-            "Présent ?": st.column_config.CheckboxColumn(help="Sélectionnez les 10 joueurs du match"),
-            "Note (1-10)": st.column_config.NumberColumn(format="%d"),
-        },
-        disabled=["Nom du Joueur", "Note (1-10)", "Poste"],
-        hide_index=True,
-        use_container_width=True
+    # 🆕 NOUVEAUTÉ : Sélection avec blocage physique et absolu à 12 joueurs maximum
+    selected_names = st.multiselect(
+        "Sélectionnez les 10 joueurs du match (Limite bloquée à 10) :",
+        options=st.session_state.players_df["Nom du Joueur"].tolist(),
+        max_selections=10,
+        help="L'application empêche automatiquement de cocher plus de 10 joueurs."
     )
     
-    selected_players = edited_df[edited_df["Présent ?"] == True]
+    # Récupération des données des joueurs sélectionnés
+    selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)]
     nb_selected = len(selected_players)
     
+    # Affichage du récapitulatif des joueurs sélectionnés (notes et postes)
+    if nb_selected > 0:
+        st.write("📋 **Effectif sélectionné :**")
+        st.dataframe(selected_players[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True, use_container_width=True)
+    
     if nb_selected == 10:
-        st.success("✅ 10 joueurs prêts !")
+        st.success("✅ 10 joueurs sélectionnés ! Prêts à générer.")
         
         if st.button("⚡ Générer les Compositions Tactiques", type="primary"):
             selected_players = selected_players.copy()
