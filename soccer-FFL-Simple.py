@@ -8,6 +8,26 @@ import io
 # Configuration de la page Streamlit
 st.set_page_config(page_title="Soccer FFL Kompo", page_icon="⚽", layout="wide")
 
+# 📳 STYLE CSS : Force l'affichage sur 2 colonnes sur mobile portrait (uniquement pour les cases à cocher)
+st.markdown(
+    """
+    <style>
+    @media (max-width: 768px) {
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) {
+            flex-direction: row !important;
+            gap: 10px !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) div[data-testid="column"] {
+            width: 50% !important;
+            flex: 1 1 50% !important;
+            min-width: 0 !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # --- FICHIERS DE STOCKAGE ---
 DATA_FILE = 'database_joueurs.xlsx'       
 EXCEL_FILE = 'Gestion_Equipes_Foot5 - Copie.xlsx' 
@@ -38,14 +58,10 @@ if 'players_df' not in st.session_state:
 
 # --- CONFIGURATION DU TERRAIN UNIQUE ET UNIFIÉ (FACES À FACES) ---
 def draw_combined_field(t1, t2):
-    # Création d'un terrain complet unique (Proportions 100x60)
     fig, ax = plt.subplots(figsize=(8, 5.2))
-    
-    # Application forcée du fond vert
     fig.patch.set_facecolor('#226343')
     ax.set_facecolor('#226343')
     
-    # --- TRACÉ DES LIGNES DU TERRAIN ---
     ax.plot([0, 100, 100, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
     ax.plot([50, 50], [0, 60], color='white', linewidth=2.0)
     center_circle = patches.Circle((50, 30), 9, edgecolor='white', facecolor='none', linewidth=1.5)
@@ -60,7 +76,6 @@ def draw_combined_field(t1, t2):
     ax.add_patch(penalty_right)
     ax.scatter(91, 30, color='white', s=15, zorder=2)
     
-    # --- PLACEMENT ÉQUIPE 1 : À GAUCHE ---
     pos1 = [(5, 30), (19, 14), (19, 46), (38, 18), (38, 42)]
     players1 = t1.sort_values(by="Poste", ascending=False).reset_index(drop=True)
     for i, row in players1.iterrows():
@@ -69,7 +84,6 @@ def draw_combined_field(t1, t2):
         ax.scatter(x, y, color="#1C6CF6", s=220, edgecolors='white', linewidths=1.5, zorder=3)
         ax.text(x, y - 4.2, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
         
-    # --- PLACEMENT ÉQUIPE 2 : À DROITE ---
     pos2 = [(95, 30), (81, 14), (81, 46), (62, 18), (62, 42)]
     players2 = t2.sort_values(by="Poste", ascending=False).reset_index(drop=True)
     for i, row in players2.iterrows():
@@ -78,7 +92,6 @@ def draw_combined_field(t1, t2):
         ax.scatter(x, y, color="#E03131", s=220, edgecolors='white', linewidths=1.5, zorder=3)
         ax.text(x, y - 4.2, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
     
-    # --- TITRES DISCRETS SANS LOGO ---
     ax.text(25, 64, "EQUIPE 1", color='#1C6CF6', fontsize=15, weight='bold', ha='center', va='center')
     ax.text(75, 64, "EQUIPE 2", color='#E03131', fontsize=15, weight='bold', ha='center', va='center')
     
@@ -111,7 +124,6 @@ def show_teams_popup(t1, t2):
     
     st.write("---")
     
-    # Texte brut (uniquement les prénoms, sans les postes)
     text_whatsapp = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n"
     text_whatsapp += "🔵 *ÉQUIPE 1* :\n"
     for _, row in t1.iterrows():
@@ -140,12 +152,10 @@ with tab1:
     st.subheader("Sélection des présents")
     st.write("Cochez les 10 joueurs du jour (triés par ordre alphabétique) :")
     
-    # Tri alphabétique des joueurs
     df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
-    
     selected_names = []
     
-    # Affichage épuré strict 2 par 2 par ligne (uniquement le nom)
+    # Affichage épuré strict 2 par 2 par ligne (Bloqué sur 2 colonnes grâce au CSS)
     for i in range(0, len(df_sorted), 2):
         cols = st.columns(2)
         
