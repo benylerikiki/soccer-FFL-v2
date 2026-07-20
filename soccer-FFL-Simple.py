@@ -35,18 +35,22 @@ def save_data(df):
 if 'players_df' not in st.session_state:
     st.session_state.players_df = load_data()
 
-# --- FONCTION GRAPHIQUE TERRAIN ---
+
+# ==========================================
+# ⚙️ CONFIGURATION MODIFIÉE DU TERRAIN
+# ==========================================
 def draw_tactical_field(team_df, primary_color):
-    fig, ax = plt.subplots(figsize=(5, 5.5))
+    # Taille globale du terrain réduite (figsize plus petit)
+    fig, ax = plt.subplots(figsize=(3.5, 3.8))
     fig.patch.set_alpha(0.0) # Fond transparent
     ax.set_facecolor('#226343') # Pelouse
     
     # Lignes du terrain
-    ax.plot([0, 50, 50, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.5)
-    penalty_area = patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=2)
+    ax.plot([0, 50, 50, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
+    penalty_area = patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5)
     ax.add_patch(penalty_area)
-    ax.scatter(9, 30, color='white', s=25, zorder=2)
-    center_arc = patches.Arc((50, 30), 18, 18, angle=0, theta1=90, theta2=270, color='white', linewidth=2)
+    ax.scatter(9, 30, color='white', s=15, zorder=2)
+    center_arc = patches.Arc((50, 30), 18, 18, angle=0, theta1=90, theta2=270, color='white', linewidth=1.5)
     ax.add_patch(center_arc)
     
     # Positions 1-2-2
@@ -56,37 +60,43 @@ def draw_tactical_field(team_df, primary_color):
     for i, row in players.iterrows():
         if i >= len(positions): break
         x, y = positions[i]
-        ax.scatter(x, y, color=primary_color, s=550, edgecolors='white', linewidths=2, zorder=3)
-        ax.text(x, y, str(int(row['Note (1-10)'])), color='white', fontsize=9, weight='bold', ha='center', va='center', zorder=4)
-        ax.text(x, y - 3.8, row['Nom du Joueur'], color='white', fontsize=10, weight='bold', ha='center', va='center',
+        
+        # Pion plus petit (s=250 au lieu de 550) car il n'y a plus de note textuelle dedans
+        ax.scatter(x, y, color=primary_color, s=250, edgecolors='white', linewidths=1.5, zorder=3)
+        
+        # [NOTE SUPPRIMÉE ICI] -> Plus de texte avec la note au centre du pion
+        
+        # Noms plus gros (fontsize augmenté à 13) et décalage y ajusté (-4.5)
+        ax.text(x, y - 4.5, row['Nom du Joueur'], color='white', fontsize=13, weight='bold', ha='center', va='center',
                 bbox=dict(facecolor='#111111', alpha=0.75, edgecolor='none', boxstyle='round,pad=0.25'), zorder=4)
+                
     ax.set_xlim(-2, 52)
-    ax.set_ylim(-2, 62)
+    ax.set_ylim(-6, 66) # Légèrement élargi pour ne pas couper les grands noms en bord de terrain
     ax.axis('off')
     plt.tight_layout()
     return fig
 
 
 # ==========================================
-# 🆕 NOUVEAUTÉ : FONCTION DU POP-UP MODAL
+# ⚙️ CONFIGURATION DU POP-UP MODAL
 # ==========================================
 @st.dialog("Compositions du Match ⚽", width="large")
 def show_teams_popup(t1, t2):
-    st.write("Voici l'équilibrage généré. Idéal pour faire une capture d'écran et l'envoyer sur votre groupe (WhatsApp/Signal) !")
+    st.write("Voici l'équilibrage généré. Prenez votre capture d'écran 📸 !")
     
-    # Création de deux colonnes à l'intérieur du pop-up
     pop_col1, pop_col2 = st.columns(2)
     
     with pop_col1:
         st.subheader("🔵 ÉQUIPE 1")
         fig1 = draw_tactical_field(t1, "#1C6CF6")
-        st.pyplot(fig1)
+        # use_container_width=False empêche le terrain de s'étirer et devenir géant
+        st.pyplot(fig1, use_container_width=False)
         st.metric("Niveau Moyen", f"{t1['Note (1-10)'].mean():.1f}")
         
     with pop_col2:
         st.subheader("🔴 ÉQUIPE 2")
         fig2 = draw_tactical_field(t2, "#E03131")
-        st.pyplot(fig2)
+        st.pyplot(fig2, use_container_width=False)
         st.metric("Niveau Moyen", f"{t2['Note (1-10)'].mean():.1f}")
         
     if st.button("Fermer"):
@@ -121,7 +131,6 @@ with tab1:
     if nb_selected == 10:
         st.success("✅ 10 joueurs prêts !")
         
-        # Déclenchement du bouton
         if st.button("⚡ Générer les Compositions Tactiques", type="primary"):
             selected_players = selected_players.copy()
             selected_players["Score Tri"] = selected_players["Note (1-10)"] + selected_players["Poste"].apply(lambda x: 0.1 if x == "Attaque" else 0.0)
@@ -133,17 +142,13 @@ with tab1:
             team1 = sorted_players.iloc[idx_team1].copy()
             team2 = sorted_players.iloc[idx_team2].copy()
             
-            # Stockage temporaire pour garder l'affichage sur la page principale si besoin
             st.session_state.last_team1 = team1
             st.session_state.last_team2 = team2
             
-            # Appeler la fonction pop-up
             show_teams_popup(team1, team2)
-
     else:
         st.info(f"🏃 Sélectionnez exactement 10 joueurs (Actuel : {nb_selected}/10)")
 
-    # Optionnel : réafficher les équipes sous le tableau si le pop-up a été fermé
     if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
         st.write("---")
         st.markdown("### 📊 Dernières équipes générées")
@@ -154,7 +159,7 @@ with tab1:
             st.dataframe(st.session_state.last_team2[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True)
 
 
-# ONGLET 2 : GESTION DES JOUEURS (Reste identique avec sauvegarde sur le disque)
+# ONGLET 2 : GESTION DES JOUEURS
 with tab2:
     st.header("Gestion de la base des joueurs")
     
