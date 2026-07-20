@@ -1,0 +1,165 @@
+import streamlit as st
+import pandas as pd
+import os
+
+# Configuration de la page Streamlit
+st.set_page_config(page_title="Foot 5 - Équilibrage Équipes", page_icon="⚽", layout="wide")
+
+EXCEL_FILE = 'Gestion_Equipes_Foot5 - Copie.xlsx'
+
+# --- CHARGEMENT DES DONNÉES ---
+def load_data():
+    if os.path.exists(EXCEL_FILE):
+        try:
+            # On charge l'onglet en sautant les 3 lignes décoratives d'en-tête
+            df = pd.read_excel(EXCEL_FILE, sheet_name='Liste des Joueurs', skiprows=3)
+            df = df.dropna(subset=["Nom du Joueur"])
+            df = df[["Nom du Joueur", "Note (1-10)", "Poste"]]
+            return df.reset_index(drop=True)
+        except Exception:
+            pass
+            
+    # Base de données de secours si le fichier est absent
+    return pd.DataFrame({
+        "Nom du Joueur": ["Antho", "Cyril V", "Apou", "Benoit", "Nico P", "Mouyss", "Cédric", "Nico M", "David", "Cyril L"],
+        "Note (1-10)": [9, 9, 6, 6, 6, 5, 5, 4, 4, 3],
+        "Poste": ["Attaque", "Défense", "Attaque", "Attaque", "Défense", "Attaque", "Défense", "Attaque", "Défense", "Défense"]
+    })
+
+# Initialisation du state
+if 'players_df' not in st.session_state:
+    st.session_state.players_df = load_data()
+
+# --- TITRE PRINCIPAL ---
+st.title("⚽ Foot 5 - Sélection & Composition Auto")
+st.write("Cochez vos 10 joueurs pour générer instantanément deux équipes équilibrées selon votre algorithme Excel.")
+
+# Configuration des Onglets (Tabs)
+tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Base de Données Joueurs"])
+
+# ==========================================
+# ONGLET 1 : ÉQUILIBRAGE
+# ==========================================
+with tab1:
+    st.header("Sélection des présents")
+    
+    pool_df = st.session_state.players_df.copy()
+    pool_df.insert(0, "Présent ?", False)
+    
+    # Éditeur interactif pour cocher les présences
+    edited_df = st.data_editor(
+        pool_df,
+        column_config={
+            "Présent ?": st.column_config.CheckboxColumn(help="Sélectionnez les 10 joueurs"),
+            "Note (1-10)": st.column_config.NumberColumn(format="%d"),
+            "Poste": st.column_config.SelectboxColumn(options=["Attaque", "Défense"])
+        },
+        disabled=["Nom du Joueur", "Note (1-10)", "Poste"],
+        hide_index=True,
+        use_container_width=True
+    )
+    
+    selected_players = edited_df[edited_df["Présent ?"] == True]
+    nb_selected = len(selected_players)
+    
+    # Message d'aide dynamique
+    if nb_selected == 10:
+        st.success(f"✅ 10 joueurs sélectionnés. Prêt pour l'équilibrage !")
+    else:
+        st.info(f"💡 Joueurs sélectionnés : **{nb_selected} / 10** (Il en faut exactement 10)")
+        
+    if nb_selected == 10:
+        if st.button("⚡ Composer les Équipes", type="primary"):
+            selected_players = selected_players.copy()
+            
+            # Application de la formule exacte du fichier Excel :
+            # Score Tri = Note + 0.1 si Attaque + micro-valeur d'index pour l'unicité
+            selected_players["Score Tri"] = selected_players["Note (1-10)"] + selected_players["Poste"].apply(lambda x: 0.1 if x == "Attaque" else 0.0)
+            
+            # Tri par Score Tri décroissant
+            sorted_players = selected_players.sort_values(by="Score Tri", ascending=False).reset_index(drop=True)
+            
+            # Distribution Snake Draft (Indices Python de 0 à 9)
+            # Équipe 1 : Rangs 1, 4, 5, 8, 9  -> Indices 0, 3, 4, 7, 8
+            # Équipe 2 : Rangs 2, 3, 6, 7, 10 -> Indices 1, 2, 5, 6, 9
+            idx_team1 = [0, 3, 4, 7, 8]
+            idx_team2 = [1, 2, 5, 6, 9]
+            
+            team1 = sorted_players.iloc[idx_team1].copy()
+            team2 = sorted_players.iloc[idx_team2].copy()
+            
+            # Affichage côte à côte
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("🔵 ÉQUIPE 1")
+                st.dataframe(team1[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True, use_container_width=True)
+                
+                # Statistiques E1
+                avg_1 = team1["Note (1-10)"].mean()
+                att_1 = (team1["Poste"] == "Attaque").sum()
+                def_1 = (team1["Poste"] == "Défense").sum()
+                
+                m1, m2 = st.columns(2)
+                m1.metric("Score Moyen", f"{avg_1:.1f}")
+                m2.metric("Répartition", f"{att_1} Att / {def_1} Déf")
+                
+            with col2:
+                st.subheader("🔴 ÉQUIPE 2")
+                st.dataframe(team2[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True, use_container_width=True)
+                
+                # Statistiques E2
+                avg_2 = team2["Note (1-10)"].mean()
+                att_2 = (team2["Poste"] == "Attaque").sum()
+                def_2 = (team2["Poste"] == "Défense").sum()
+                
+                m3, m4 = st.columns(2)
+                m3.metric("Score Moyen", f"{avg_2:.1f}")
+                m4.metric("Répartition", f"{att_2} Att / {def_2} Déf")
+
+# ==========================================
+# ONGLET 2 : GESTION DES JOUEURS
+# ==========================================
+with tab2:
+    st.header("Gestion du groupe")
+    
+    # Formulaire d'ajout rapide
+    with st.expander("➕ Enregistrer un nouveau joueur"):
+        with st.form("form_add"):
+            name = st.text_input("Nom de famille / Pseudo")
+            note = st.slider("Note globale (1 à 10)", 1, 10, 5)
+            poste = st.radio("Poste préférentiel", ["Attaque", "Défense"], horizontal=True)
+            
+            submitted = st.form_submit_button("Ajouter à l'effectif")
+            if submitted:
+                if not name.strip():
+                    st.error("Veuillez saisir un nom valide.")
+                elif name.strip() in st.session_state.players_df["Nom du Joueur"].values:
+                    st.error("Ce joueur existe déjà dans la base.")
+                else:
+                    new_player = pd.DataFrame({"Nom du Joueur": [name.strip()], "Note (1-10)": [note], "Poste": [poste]})
+                    st.session_state.players_df = pd.concat([st.session_state.players_df, new_player], ignore_index=True)
+                    st.success(f"⚽ {name.strip()} a rejoint l'effectif !")
+                    st.rerun()
+                    
+    # Visualisation globale & modification directe
+    st.subheader("Effectif actuel")
+    edited_players = st.data_editor(
+        st.session_state.players_df,
+        column_config={
+            "Note (1-10)": st.column_config.NumberColumn(min_value=1, max_value=10, step=1),
+            "Poste": st.column_config.SelectboxColumn(options=["Attaque", "Défense"])
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+    st.session_state.players_df = edited_players
+    
+    # Suppression d'un profil
+    st.write("---")
+    player_to_remove = st.selectbox("Sélectionnez un joueur à retirer", ["-- Aucun --"] + list(st.session_state.players_df["Nom du Joueur"]))
+    if player_to_remove != "-- Aucun --":
+        if st.button("🗑️ Confirmer la suppression", type="secondary"):
+            st.session_state.players_df = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] != player_to_remove]
+            st.success(f"Joueur {player_to_remove} supprimé.")
+            st.rerun()
