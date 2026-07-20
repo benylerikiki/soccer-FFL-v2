@@ -36,11 +36,8 @@ if 'players_df' not in st.session_state:
     st.session_state.players_df = load_data()
 
 
-# ==========================================
-# ⚙️ CONFIGURATION MODIFIÉE DU TERRAIN
-# ==========================================
+# --- CONFIGURATION DU TERRAIN ---
 def draw_tactical_field(team_df, primary_color):
-    # Taille globale du terrain réduite (figsize plus petit)
     fig, ax = plt.subplots(figsize=(3.5, 3.8))
     fig.patch.set_alpha(0.0) # Fond transparent
     ax.set_facecolor('#226343') # Pelouse
@@ -61,43 +58,54 @@ def draw_tactical_field(team_df, primary_color):
         if i >= len(positions): break
         x, y = positions[i]
         
-        # Pion plus petit (s=250 au lieu de 550) car il n'y a plus de note textuelle dedans
+        # Pions de joueurs
         ax.scatter(x, y, color=primary_color, s=250, edgecolors='white', linewidths=1.5, zorder=3)
         
-        # [NOTE SUPPRIMÉE ICI] -> Plus de texte avec la note au centre du pion
-        
-        # Noms plus gros (fontsize augmenté à 13) et décalage y ajusté (-4.5)
-        ax.text(x, y - 4.5, row['Nom du Joueur'], color='white', fontsize=13, weight='bold', ha='center', va='center',
+        # 📣 Police diminuée à 12 selon votre demande
+        ax.text(x, y - 4.5, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center',
                 bbox=dict(facecolor='#111111', alpha=0.75, edgecolor='none', boxstyle='round,pad=0.25'), zorder=4)
                 
     ax.set_xlim(-2, 52)
-    ax.set_ylim(-6, 66) # Légèrement élargi pour ne pas couper les grands noms en bord de terrain
+    ax.set_ylim(-6, 66)
     ax.axis('off')
     plt.tight_layout()
     return fig
 
 
-# ==========================================
-# ⚙️ CONFIGURATION DU POP-UP MODAL
-# ==========================================
+# --- CONFIGURATION DU POP-UP MODAL ---
 @st.dialog("Compositions du Match ⚽", width="large")
 def show_teams_popup(t1, t2):
-    st.write("Voici l'équilibrage généré. Prenez votre capture d'écran 📸 !")
+    st.write("Voici l'équilibrage généré. Prenez votre capture d'écran 📸 ou copiez le texte ci-dessous !")
     
     pop_col1, pop_col2 = st.columns(2)
     
     with pop_col1:
         st.subheader("🔵 ÉQUIPE 1")
         fig1 = draw_tactical_field(t1, "#1C6CF6")
-        # use_container_width=False empêche le terrain de s'étirer et devenir géant
         st.pyplot(fig1, use_container_width=False)
-        st.metric("Niveau Moyen", f"{t1['Note (1-10)'].mean():.1f}")
+        # [Niveau moyen supprimé d'ici]
         
     with pop_col2:
         st.subheader("🔴 ÉQUIPE 2")
         fig2 = draw_tactical_field(t2, "#E03131")
         st.pyplot(fig2, use_container_width=False)
-        st.metric("Niveau Moyen", f"{t2['Note (1-10)'].mean():.1f}")
+        # [Niveau moyen supprimé d'ici]
+        
+    st.write("---")
+    
+    # 📝 Génération du texte formaté pour WhatsApp / Signal
+    text_whatsapp = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n"
+    text_whatsapp += "🔵 *ÉQUIPE 1* :\n"
+    for _, row in t1.iterrows():
+        text_whatsapp += f"• {row['Nom du Joueur']} ({row['Poste']})\n"
+        
+    text_whatsapp += "\n🔴 *ÉQUIPE 2* :\n"
+    for _, row in t2.iterrows():
+        text_whatsapp += f"• {row['Nom du Joueur']} ({row['Poste']})\n"
+        
+    st.markdown("**📋 Copier les équipes pour votre groupe (cliquez sur le bouton en haut à droite du bloc) :**")
+    # st.code affiche un petit bouton de copie automatique au survol ou au clic
+    st.code(text_whatsapp, language="text")
         
     if st.button("Fermer"):
         st.rerun()
