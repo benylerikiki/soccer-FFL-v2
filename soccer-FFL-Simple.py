@@ -122,11 +122,8 @@ def show_teams_popup(t1, t2):
         text_whatsapp += f"• {row['Nom du Joueur']}\n"
         
     st.markdown("**📋 Copier le texte brut pour votre groupe :**")
+    st.caption("💡 Survolez le bloc de texte ci-dessous et cliquez sur la petite icône en haut à droite pour tout copier d'un coup.")
     
-    # 🆕 AJOUT ICI : Bouton natif pour copier directement dans le presse-papiers
-    st.copy_to_clipboard(text_whatsapp, label="📋 Copier la liste de texte")
-    
-    # On laisse quand même le visuel pour vérification visuelle si besoin
     st.code(text_whatsapp, language="text")
         
     if st.button("Fermer"):
@@ -141,21 +138,30 @@ tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
 # ONGLET 1 : EQUILIBRAGE
 with tab1:
     st.subheader("Sélection des présents")
+    st.write("Cochez les 10 joueurs du jour (triés par ordre alphabétique) :")
     
-    selected_names = st.multiselect(
-        "Sélectionnez les 10 joueurs du match (Limite bloquée à 10) :",
-        options=st.session_state.players_df["Nom du Joueur"].tolist(),
-        max_selections=10,
-        help="L'application empêche automatiquement de cocher plus de 10 joueurs."
-    )
+    # 🆕 NOUVELLE MÉTHODE : Grille de cases à cocher (Anti-clavier mobile)
+    # Tri alphabétique des joueurs pour s'y retrouver facilement
+    df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
     
+    selected_names = []
+    cols = st.columns(2) # Crée 2 colonnes adaptées aux écrans de smartphones
+    
+    for idx, row in df_sorted.iterrows():
+        name = row["Nom du Joueur"]
+        poste_short = "A" if row["Poste"] == "Attaque" else "D"
+        label = f"{name} ({poste_short} - {row['Note (1-10)']}/10)"
+        
+        with cols[idx % 2]: # Alterne les lignes sur les 2 colonnes
+            if st.checkbox(label, key=f"select_{name}"):
+                selected_names.append(name)
+                
     selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)]
     nb_selected = len(selected_players)
     
-    if nb_selected > 0:
-        st.write("📋 **Effectif sélectionné :**")
-        st.dataframe(selected_players[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True, use_container_width=True)
+    st.write("---")
     
+    # Gestion des messages de restriction selon le nombre exact de cochés
     if nb_selected == 10:
         st.success("✅ 10 joueurs sélectionnés ! Prêts à générer.")
         
@@ -174,6 +180,9 @@ with tab1:
             st.session_state.last_team2 = team2
             
             show_teams_popup(team1, team2)
+            
+    elif nb_selected > 10:
+        st.error(f"⚠️ Trop de joueurs sélectionnés ({nb_selected}/10). Veuillez en décocher {nb_selected - 10} !")
     else:
         st.info(f"🏃 Sélectionnez exactement 10 joueurs (Actuel : {nb_selected}/10)")
 
