@@ -36,46 +36,61 @@ if 'players_df' not in st.session_state:
     st.session_state.players_df = load_data()
 
 
-# --- 🆕 FUSION ET CONFIGURATION DES DEUX TERRAINS EN UNE SEULE IMAGE ---
+# --- 🆕 CONFIGURATION DU TERRAIN UNIQUE ET UNIFIÉ (FACES À FACES) ---
 def draw_combined_field(t1, t2):
-    # Création d'une figure unique contenant 2 sous-graphiques côte à côte
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.8))
-    fig.patch.set_alpha(0.0) # Fond transparent pour l'affichage web
+    # Création d'un terrain complet unique (Proportions 100x60)
+    fig, ax = plt.subplots(figsize=(8, 5.2))
     
-    def draw_single_pitch(ax, team_df, primary_color, title_text):
-        ax.set_facecolor('#226343') # Pelouse
-        
-        # Lignes du terrain
-        ax.plot([0, 50, 50, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
-        penalty_area = patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5)
-        ax.add_patch(penalty_area)
-        ax.scatter(9, 30, color='white', s=15, zorder=2)
-        center_arc = patches.Arc((50, 30), 18, 18, angle=0, theta1=90, theta2=270, color='white', linewidth=1.5)
-        ax.add_patch(center_arc)
-        
-        # Positions 1-2-2
-        positions = [(5, 30), (19, 14), (19, 46), (38, 18), (38, 42)]
-        players = team_df.sort_values(by="Poste", ascending=False).reset_index(drop=True)
-        
-        for i, row in players.iterrows():
-            if i >= len(positions): break
-            x, y = positions[i]
-            
-            # Pions de joueurs
-            ax.scatter(x, y, color=primary_color, s=250, edgecolors='white', linewidths=1.5, zorder=3)
-            
-            # 📣 Suppression du fond 'bbox' : écriture directe en blanc sur le vert
-            ax.text(x, y - 4.5, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
-                    
-        ax.set_xlim(-2, 52)
-        ax.set_ylim(-6, 66)
-        ax.set_title(title_text, color='white', fontsize=14, weight='bold', pad=8)
-        ax.axis('off')
-
-    # Dessin de l'Équipe 1 (Gauche) et Équipe 2 (Droite)
-    draw_single_pitch(ax1, t1, "#1C6CF6", "🔵 ÉQUIPE 1")
-    draw_single_pitch(ax2, t2, "#E03131", "🔴 ÉQUIPE 2")
+    # Application forcée du fond vert (évite le fond blanc ou transparent buggé)
+    fig.patch.set_facecolor('#226343')
+    ax.set_facecolor('#226343')
     
+    # --- TRACÉ DES LIGNES DU TERRAIN ---
+    # Limites extérieures
+    ax.plot([0, 100, 100, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
+    # Ligne médiane (qui colle les deux terrains)
+    ax.plot([50, 50], [0, 60], color='white', linewidth=2.0)
+    # Rond central et point central
+    center_circle = patches.Circle((50, 30), 9, edgecolor='white', facecolor='none', linewidth=1.5)
+    ax.add_patch(center_circle)
+    ax.scatter(50, 30, color='white', s=15, zorder=2)
+    
+    # Surface de réparation Gauche (Équipe 1)
+    penalty_left = patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5)
+    ax.add_patch(penalty_left)
+    ax.scatter(9, 30, color='white', s=15, zorder=2)
+    
+    # Surface de réparation Droite (Équipe 2)
+    penalty_right = patches.Rectangle((88, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5)
+    ax.add_patch(penalty_right)
+    ax.scatter(91, 30, color='white', s=15, zorder=2)
+    
+    # --- PLACEMENT ÉQUIPE 1 : À GAUCHE (ATTACQUE VERS LA DROITE) ---
+    pos1 = [(5, 30), (19, 14), (19, 46), (38, 18), (38, 42)]
+    players1 = t1.sort_values(by="Poste", ascending=False).reset_index(drop=True)
+    for i, row in players1.iterrows():
+        if i >= len(pos1): break
+        x, y = pos1[i]
+        ax.scatter(x, y, color="#1C6CF6", s=220, edgecolors='white', linewidths=1.5, zorder=3)
+        ax.text(x, y - 4.2, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
+        
+    # --- PLACEMENT ÉQUIPE 2 : À DROITE (INVERSÉE, FAIT FACE À L'ÉQUIPE 1) ---
+    pos2 = [(95, 30), (81, 14), (81, 46), (62, 18), (62, 42)]
+    players2 = t2.sort_values(by="Poste", ascending=False).reset_index(drop=True)
+    for i, row in players2.iterrows():
+        if i >= len(pos2): break
+        x, y = pos2[i]
+        ax.scatter(x, y, color="#E03131", s=220, edgecolors='white', linewidths=1.5, zorder=3)
+        ax.text(x, y - 4.2, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
+    
+    # --- TITRES DISCRETS SANS LOGO (BLEU ET ROUGE) ---
+    ax.text(25, 64, "EQUIPE 1", color='#1C6CF6', fontsize=15, weight='bold', ha='center', va='center')
+    ax.text(75, 64, "EQUIPE 2", color='#E03131', fontsize=15, weight='bold', ha='center', va='center')
+    
+    # Ajustement des limites pour inclure les titres sans les couper
+    ax.set_xlim(-4, 104)
+    ax.set_ylim(-6, 68)
+    ax.axis('off')
     plt.tight_layout()
     return fig
 
@@ -83,38 +98,35 @@ def draw_combined_field(t1, t2):
 # --- CONFIGURATION DU POP-UP MODAL ---
 @st.dialog("Compositions du Match ⚽", width="large")
 def show_teams_popup(t1, t2):
-    st.write("Voici les compositions générées. Cliquez sur le bouton rouge ci-dessous pour télécharger l'image directement ! 📸")
+    st.write("Voici la composition sous forme de match. Cliquez sur le bouton ci-dessous pour enregistrer l'image ! 📸")
     
-    # Génération du graphique combiné unique
     fig_combined = draw_combined_field(t1, t2)
     st.pyplot(fig_combined, use_container_width=True)
     
-    # Préparation du fichier image dans un buffer mémoire pour le téléchargement
+    # Préparation du téléchargement avec conservation stricte de la couleur verte
     buf = io.BytesIO()
-    # On applique un fond sombre lors de la sauvegarde pour que l'image ressorte super bien sur WhatsApp (mode sombre ou clair)
-    fig_combined.savefig(buf, format="png", bbox_inches='tight', dpi=200, facecolor='#151515')
+    fig_combined.savefig(buf, format="png", bbox_inches='tight', dpi=250, facecolor='#226343')
     buf.seek(0)
     
-    # 🆕 BOUTON DE TÉLÉCHARGEMENT DE L'IMAGE UNIQUE
     st.download_button(
         label="📸 Télécharger l'image des compositions (PNG)",
         data=buf,
         file_name="Compositions_FFL.png",
         mime="image/png",
-        type="primary" # Met le bouton en valeur (rouge/couleur principale)
+        type="primary" 
     )
     
     st.write("---")
     
-    # Génération du texte formaté pour WhatsApp / Signal
+    # Texte brut (uniquement les prénoms, sans les postes)
     text_whatsapp = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n"
     text_whatsapp += "🔵 *ÉQUIPE 1* :\n"
     for _, row in t1.iterrows():
-        text_whatsapp += f"• {row['Nom du Joueur']} ({row['Poste']})\n"
+        text_whatsapp += f"• {row['Nom du Joueur']}\n"
         
     text_whatsapp += "\n🔴 *ÉQUIPE 2* :\n"
     for _, row in t2.iterrows():
-        text_whatsapp += f"• {row['Nom du Joueur']} ({row['Poste']})\n"
+        text_whatsapp += f"• {row['Nom du Joueur']}\n"
         
     st.markdown("**📋 Alternative : Copier le texte brut pour votre groupe :**")
     st.code(text_whatsapp, language="text")
