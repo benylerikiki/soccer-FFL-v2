@@ -145,27 +145,23 @@ with tab1:
     
     selected_names = []
     
-    # Affichage strict 2 par 2 par ligne (Grid de lignes)
+    # Affichage épuré strict 2 par 2 par ligne (uniquement le nom)
     for i in range(0, len(df_sorted), 2):
-        cols = st.columns(2) # Crée une nouvelle ligne de 2 colonnes
+        cols = st.columns(2)
         
-        # Premier joueur (colonne de gauche)
+        # Premier joueur (gauche)
         row1 = df_sorted.iloc[i]
         name1 = row1["Nom du Joueur"]
-        poste1 = "Attaquant" if row1["Poste"] == "Attaque" else "Défenseur"
-        label1 = f"{name1} ({poste1} - {row1['Note (1-10)']}/10)"
         with cols[0]:
-            if st.checkbox(label1, key=f"select_{name1}"):
+            if st.checkbox(name1, key=f"select_{name1}"):
                 selected_names.append(name1)
                 
-        # Deuxième joueur (colonne de droite, si existant dans la liste)
+        # Deuxième joueur (droite)
         if i + 1 < len(df_sorted):
             row2 = df_sorted.iloc[i + 1]
             name2 = row2["Nom du Joueur"]
-            poste2 = "Attaquant" if row2["Poste"] == "Attaque" else "Défenseur"
-            label2 = f"{name2} ({poste2} - {row2['Note (1-10)']}/10)"
             with cols[1]:
-                if st.checkbox(label2, key=f"select_{name2}"):
+                if st.checkbox(name2, key=f"select_{name2}"):
                     selected_names.append(name2)
                 
     selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)]
