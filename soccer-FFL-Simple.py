@@ -6,7 +6,7 @@ import matplotlib.patches as patches
 import io
 
 # Configuration de la page Streamlit
-st.set_page_config(page_title="Foot 5 - Tactique & Équilibrage", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Soccer FFL Kompo", page_icon="⚽", layout="wide")
 
 # --- FICHIERS DE STOCKAGE ---
 DATA_FILE = 'database_joueurs.xlsx'       
@@ -61,7 +61,7 @@ def draw_tactical_field(team_df, primary_color):
         # Pions de joueurs
         ax.scatter(x, y, color=primary_color, s=250, edgecolors='white', linewidths=1.5, zorder=3)
         
-        # 📣 Police diminuée à 12 selon votre demande
+        # Police à 12
         ax.text(x, y - 4.5, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center',
                 bbox=dict(facecolor='#111111', alpha=0.75, edgecolor='none', boxstyle='round,pad=0.25'), zorder=4)
                 
@@ -83,17 +83,15 @@ def show_teams_popup(t1, t2):
         st.subheader("🔵 ÉQUIPE 1")
         fig1 = draw_tactical_field(t1, "#1C6CF6")
         st.pyplot(fig1, use_container_width=False)
-        # [Niveau moyen supprimé d'ici]
         
     with pop_col2:
         st.subheader("🔴 ÉQUIPE 2")
         fig2 = draw_tactical_field(t2, "#E03131")
         st.pyplot(fig2, use_container_width=False)
-        # [Niveau moyen supprimé d'ici]
         
     st.write("---")
     
-    # 📝 Génération du texte formaté pour WhatsApp / Signal
+    # Génération du texte formaté pour WhatsApp / Signal
     text_whatsapp = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n"
     text_whatsapp += "🔵 *ÉQUIPE 1* :\n"
     for _, row in t1.iterrows():
@@ -104,7 +102,6 @@ def show_teams_popup(t1, t2):
         text_whatsapp += f"• {row['Nom du Joueur']} ({row['Poste']})\n"
         
     st.markdown("**📋 Copier les équipes pour votre groupe (cliquez sur le bouton en haut à droite du bloc) :**")
-    # st.code affiche un petit bouton de copie automatique au survol ou au clic
     st.code(text_whatsapp, language="text")
         
     if st.button("Fermer"):
@@ -112,7 +109,8 @@ def show_teams_popup(t1, t2):
 
 
 # --- LOGIQUE INTERFACE ---
-st.title("⚽ Foot 5 - Composition & Visualisation Terrain")
+# 🆕 Remplacement du gros st.title par un st.header plus petit et mise à jour du texte
+st.header("⚽ Soccer FFL Kompo")
 
 tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
 
