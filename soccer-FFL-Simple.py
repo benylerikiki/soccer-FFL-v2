@@ -36,36 +36,31 @@ if 'players_df' not in st.session_state:
     st.session_state.players_df = load_data()
 
 
-# --- 🆕 CONFIGURATION DU TERRAIN UNIQUE ET UNIFIÉ (FACES À FACES) ---
+# --- CONFIGURATION DU TERRAIN UNIQUE ET UNIFIÉ (FACES À FACES) ---
 def draw_combined_field(t1, t2):
     # Création d'un terrain complet unique (Proportions 100x60)
     fig, ax = plt.subplots(figsize=(8, 5.2))
     
-    # Application forcée du fond vert (évite le fond blanc ou transparent buggé)
+    # Application forcée du fond vert
     fig.patch.set_facecolor('#226343')
     ax.set_facecolor('#226343')
     
     # --- TRACÉ DES LIGNES DU TERRAIN ---
-    # Limites extérieures
     ax.plot([0, 100, 100, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
-    # Ligne médiane (qui colle les deux terrains)
     ax.plot([50, 50], [0, 60], color='white', linewidth=2.0)
-    # Rond central et point central
     center_circle = patches.Circle((50, 30), 9, edgecolor='white', facecolor='none', linewidth=1.5)
     ax.add_patch(center_circle)
     ax.scatter(50, 30, color='white', s=15, zorder=2)
     
-    # Surface de réparation Gauche (Équipe 1)
     penalty_left = patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5)
     ax.add_patch(penalty_left)
     ax.scatter(9, 30, color='white', s=15, zorder=2)
     
-    # Surface de réparation Droite (Équipe 2)
     penalty_right = patches.Rectangle((88, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5)
     ax.add_patch(penalty_right)
     ax.scatter(91, 30, color='white', s=15, zorder=2)
     
-    # --- PLACEMENT ÉQUIPE 1 : À GAUCHE (ATTACQUE VERS LA DROITE) ---
+    # --- PLACEMENT ÉQUIPE 1 : À GAUCHE ---
     pos1 = [(5, 30), (19, 14), (19, 46), (38, 18), (38, 42)]
     players1 = t1.sort_values(by="Poste", ascending=False).reset_index(drop=True)
     for i, row in players1.iterrows():
@@ -74,7 +69,7 @@ def draw_combined_field(t1, t2):
         ax.scatter(x, y, color="#1C6CF6", s=220, edgecolors='white', linewidths=1.5, zorder=3)
         ax.text(x, y - 4.2, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
         
-    # --- PLACEMENT ÉQUIPE 2 : À DROITE (INVERSÉE, FAIT FACE À L'ÉQUIPE 1) ---
+    # --- PLACEMENT ÉQUIPE 2 : À DROITE ---
     pos2 = [(95, 30), (81, 14), (81, 46), (62, 18), (62, 42)]
     players2 = t2.sort_values(by="Poste", ascending=False).reset_index(drop=True)
     for i, row in players2.iterrows():
@@ -83,11 +78,10 @@ def draw_combined_field(t1, t2):
         ax.scatter(x, y, color="#E03131", s=220, edgecolors='white', linewidths=1.5, zorder=3)
         ax.text(x, y - 4.2, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
     
-    # --- TITRES DISCRETS SANS LOGO (BLEU ET ROUGE) ---
+    # --- TITRES DISCRETS SANS LOGO ---
     ax.text(25, 64, "EQUIPE 1", color='#1C6CF6', fontsize=15, weight='bold', ha='center', va='center')
     ax.text(75, 64, "EQUIPE 2", color='#E03131', fontsize=15, weight='bold', ha='center', va='center')
     
-    # Ajustement des limites pour inclure les titres sans les couper
     ax.set_xlim(-4, 104)
     ax.set_ylim(-6, 68)
     ax.axis('off')
@@ -103,7 +97,6 @@ def show_teams_popup(t1, t2):
     fig_combined = draw_combined_field(t1, t2)
     st.pyplot(fig_combined, use_container_width=True)
     
-    # Préparation du téléchargement avec conservation stricte de la couleur verte
     buf = io.BytesIO()
     fig_combined.savefig(buf, format="png", bbox_inches='tight', dpi=250, facecolor='#226343')
     buf.seek(0)
@@ -128,7 +121,12 @@ def show_teams_popup(t1, t2):
     for _, row in t2.iterrows():
         text_whatsapp += f"• {row['Nom du Joueur']}\n"
         
-    st.markdown("**📋 Alternative : Copier le texte brut pour votre groupe :**")
+    st.markdown("**📋 Copier le texte brut pour votre groupe :**")
+    
+    # 🆕 AJOUT ICI : Bouton natif pour copier directement dans le presse-papiers
+    st.copy_to_clipboard(text_whatsapp, label="📋 Copier la liste de texte")
+    
+    # On laisse quand même le visuel pour vérification visuelle si besoin
     st.code(text_whatsapp, language="text")
         
     if st.button("Fermer"):
