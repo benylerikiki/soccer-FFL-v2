@@ -36,38 +36,46 @@ if 'players_df' not in st.session_state:
     st.session_state.players_df = load_data()
 
 
-# --- CONFIGURATION DU TERRAIN ---
-def draw_tactical_field(team_df, primary_color):
-    fig, ax = plt.subplots(figsize=(3.5, 3.8))
-    fig.patch.set_alpha(0.0) # Fond transparent
-    ax.set_facecolor('#226343') # Pelouse
+# --- 🆕 FUSION ET CONFIGURATION DES DEUX TERRAINS EN UNE SEULE IMAGE ---
+def draw_combined_field(t1, t2):
+    # Création d'une figure unique contenant 2 sous-graphiques côte à côte
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.5, 3.8))
+    fig.patch.set_alpha(0.0) # Fond transparent pour l'affichage web
     
-    # Lignes du terrain
-    ax.plot([0, 50, 50, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
-    penalty_area = patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5)
-    ax.add_patch(penalty_area)
-    ax.scatter(9, 30, color='white', s=15, zorder=2)
-    center_arc = patches.Arc((50, 30), 18, 18, angle=0, theta1=90, theta2=270, color='white', linewidth=1.5)
-    ax.add_patch(center_arc)
-    
-    # Positions 1-2-2
-    positions = [(5, 30), (19, 14), (19, 46), (38, 18), (38, 42)]
-    players = team_df.sort_values(by="Poste", ascending=False).reset_index(drop=True)
-    
-    for i, row in players.iterrows():
-        if i >= len(positions): break
-        x, y = positions[i]
+    def draw_single_pitch(ax, team_df, primary_color, title_text):
+        ax.set_facecolor('#226343') # Pelouse
         
-        # Pions de joueurs
-        ax.scatter(x, y, color=primary_color, s=250, edgecolors='white', linewidths=1.5, zorder=3)
+        # Lignes du terrain
+        ax.plot([0, 50, 50, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
+        penalty_area = patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5)
+        ax.add_patch(penalty_area)
+        ax.scatter(9, 30, color='white', s=15, zorder=2)
+        center_arc = patches.Arc((50, 30), 18, 18, angle=0, theta1=90, theta2=270, color='white', linewidth=1.5)
+        ax.add_patch(center_arc)
         
-        # Police à 12
-        ax.text(x, y - 4.5, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center',
-                bbox=dict(facecolor='#111111', alpha=0.75, edgecolor='none', boxstyle='round,pad=0.25'), zorder=4)
-                
-    ax.set_xlim(-2, 52)
-    ax.set_ylim(-6, 66)
-    ax.axis('off')
+        # Positions 1-2-2
+        positions = [(5, 30), (19, 14), (19, 46), (38, 18), (38, 42)]
+        players = team_df.sort_values(by="Poste", ascending=False).reset_index(drop=True)
+        
+        for i, row in players.iterrows():
+            if i >= len(positions): break
+            x, y = positions[i]
+            
+            # Pions de joueurs
+            ax.scatter(x, y, color=primary_color, s=250, edgecolors='white', linewidths=1.5, zorder=3)
+            
+            # 📣 Suppression du fond 'bbox' : écriture directe en blanc sur le vert
+            ax.text(x, y - 4.5, row['Nom du Joueur'], color='white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
+                    
+        ax.set_xlim(-2, 52)
+        ax.set_ylim(-6, 66)
+        ax.set_title(title_text, color='white', fontsize=14, weight='bold', pad=8)
+        ax.axis('off')
+
+    # Dessin de l'Équipe 1 (Gauche) et Équipe 2 (Droite)
+    draw_single_pitch(ax1, t1, "#1C6CF6", "🔵 ÉQUIPE 1")
+    draw_single_pitch(ax2, t2, "#E03131", "🔴 ÉQUIPE 2")
+    
     plt.tight_layout()
     return fig
 
@@ -75,20 +83,27 @@ def draw_tactical_field(team_df, primary_color):
 # --- CONFIGURATION DU POP-UP MODAL ---
 @st.dialog("Compositions du Match ⚽", width="large")
 def show_teams_popup(t1, t2):
-    st.write("Voici l'équilibrage généré. Prenez votre capture d'écran 📸 ou copiez le texte ci-dessous !")
+    st.write("Voici les compositions générées. Cliquez sur le bouton rouge ci-dessous pour télécharger l'image directement ! 📸")
     
-    pop_col1, pop_col2 = st.columns(2)
+    # Génération du graphique combiné unique
+    fig_combined = draw_combined_field(t1, t2)
+    st.pyplot(fig_combined, use_container_width=True)
     
-    with pop_col1:
-        st.subheader("🔵 ÉQUIPE 1")
-        fig1 = draw_tactical_field(t1, "#1C6CF6")
-        st.pyplot(fig1, use_container_width=False)
-        
-    with pop_col2:
-        st.subheader("🔴 ÉQUIPE 2")
-        fig2 = draw_tactical_field(t2, "#E03131")
-        st.pyplot(fig2, use_container_width=False)
-        
+    # Préparation du fichier image dans un buffer mémoire pour le téléchargement
+    buf = io.BytesIO()
+    # On applique un fond sombre lors de la sauvegarde pour que l'image ressorte super bien sur WhatsApp (mode sombre ou clair)
+    fig_combined.savefig(buf, format="png", bbox_inches='tight', dpi=200, facecolor='#151515')
+    buf.seek(0)
+    
+    # 🆕 BOUTON DE TÉLÉCHARGEMENT DE L'IMAGE UNIQUE
+    st.download_button(
+        label="📸 Télécharger l'image des compositions (PNG)",
+        data=buf,
+        file_name="Compositions_FFL.png",
+        mime="image/png",
+        type="primary" # Met le bouton en valeur (rouge/couleur principale)
+    )
+    
     st.write("---")
     
     # Génération du texte formaté pour WhatsApp / Signal
@@ -101,7 +116,7 @@ def show_teams_popup(t1, t2):
     for _, row in t2.iterrows():
         text_whatsapp += f"• {row['Nom du Joueur']} ({row['Poste']})\n"
         
-    st.markdown("**📋 Copier les équipes pour votre groupe (cliquez sur le bouton en haut à droite du bloc) :**")
+    st.markdown("**📋 Alternative : Copier le texte brut pour votre groupe :**")
     st.code(text_whatsapp, language="text")
         
     if st.button("Fermer"):
@@ -117,7 +132,6 @@ tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
 with tab1:
     st.subheader("Sélection des présents")
     
-    # 🆕 NOUVEAUTÉ : Sélection avec blocage physique et absolu à 12 joueurs maximum
     selected_names = st.multiselect(
         "Sélectionnez les 10 joueurs du match (Limite bloquée à 10) :",
         options=st.session_state.players_df["Nom du Joueur"].tolist(),
@@ -125,11 +139,9 @@ with tab1:
         help="L'application empêche automatiquement de cocher plus de 10 joueurs."
     )
     
-    # Récupération des données des joueurs sélectionnés
     selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)]
     nb_selected = len(selected_players)
     
-    # Affichage du récapitulatif des joueurs sélectionnés (notes et postes)
     if nb_selected > 0:
         st.write("📋 **Effectif sélectionné :**")
         st.dataframe(selected_players[["Nom du Joueur", "Note (1-10)", "Poste"]], hide_index=True, use_container_width=True)
