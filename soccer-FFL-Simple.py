@@ -13,12 +13,12 @@ import base64
 DATA_FILE = 'database_joueurs_v2.xlsx'       
 BLUE_CARD_PATH = 'card_blue.png'
 RED_CARD_PATH = 'card_red.png'
-YELLOW_CARD_PATH = 'card_yellow.png'  # Carte spécifique pour les jokers
+YELLOW_CARD_PATH = 'card_yellow.png'
 FONT_PATH = 'FootballAttack.otf'
 LOGO_PATH = 'icon_ffl.png'
-IMAGE_PATH = 'Intro.jpeg'  # Image de garde d'accueil
+IMAGE_PATH = 'Intro.jpeg'
 
-# --- 1. CHARGEMENT DE L'ICÔNE POUR STREAMLIT ---
+# --- 1. CHARGEMENT DE L'ICÔNE ---
 app_icon = "⚽"
 if os.path.exists(LOGO_PATH):
     try:
@@ -26,14 +26,13 @@ if os.path.exists(LOGO_PATH):
     except Exception:
         app_icon = "⚽"
 
-# Configuration de la page Streamlit
 st.set_page_config(
     page_title="Soccer FFL Kompo", 
     page_icon=app_icon, 
     layout="wide"
 )
 
-# --- 2. INJECTION JAVASCRIPT / CSS POUR FORCER L'ICÔNE SUR MOBILE (PWA) ET RENDRE L'IMAGE D'ACCUEIL CLIQUABLE ---
+# --- 2. CSS & PWA FIX ---
 if os.path.exists(LOGO_PATH):
     with open(LOGO_PATH, "rb") as f:
         icon_bytes = f.read()
@@ -56,7 +55,6 @@ if os.path.exists(LOGO_PATH):
     """
     st.markdown(pwa_javascript_fix, unsafe_allow_html=True)
 
-# CSS : Grille mobile + Superposition du bouton cliquable sur l'image d'accueil
 st.markdown(
     """
     <style>
@@ -77,7 +75,6 @@ st.markdown(
         }
     }
 
-    /* Conteneur d'image cliquable avec superposition de bouton */
     .landing-wrapper {
         position: relative;
         width: 100%;
@@ -93,7 +90,6 @@ st.markdown(
         border-radius: 16px;
         box-shadow: 0 6px 25px rgba(0,0,0,0.6);
     }
-    /* Rendre le bouton Streamlit transparent et recouvrant toute l'image */
     div[data-testid="stElementContainer"]:has(button[key="overlay_enter_btn"]) {
         position: absolute !important;
         top: 0 !important;
@@ -119,11 +115,9 @@ st.markdown(
 if 'show_landing' not in st.session_state:
     st.session_state['show_landing'] = True
 
-# 🌟 SYSTÈME DE NOTATION SUR 10 ÉTOILES
 TEXT_OPTIONS = [f"{i} ⭐" for i in range(1, 11)]
 
 def text_to_score(text_value):
-    """ Extrait la valeur numérique (1 à 10) depuis n'importe quelle valeur """
     if pd.isna(text_value):
         return 5
     match = re.search(r'\d+', str(text_value))
@@ -133,12 +127,10 @@ def text_to_score(text_value):
     return 5
 
 def format_star_option(val):
-    """ Force la valeur à correspondre exactement à une entrée de TEXT_OPTIONS """
     score = text_to_score(val)
     return f"{score} ⭐"
 
 def calculate_global_score(row):
-    """ Calcule la moyenne des 4 compétences et renvoie une chaîne formatée """
     att = text_to_score(row.get("Attaque", 5))
     defe = text_to_score(row.get("Défense", 5))
     gk = text_to_score(row.get("Gardien", 5))
@@ -196,7 +188,7 @@ if 'auto_selected' not in st.session_state:
     st.session_state.auto_selected = set()
 
 # ==========================================
-# 🖼️ PAGE DE GARDE : IMAGE REELLEMENT CLIQUABLE
+# 🖼️ PAGE DE GARDE
 # ==========================================
 if st.session_state.get('show_landing', True):
     if os.path.exists(IMAGE_PATH):
@@ -204,7 +196,6 @@ if st.session_state.get('show_landing', True):
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
-        # Affichage de l'image dans son conteneur
         st.markdown(
             f"""
             <div class="landing-wrapper">
@@ -214,14 +205,13 @@ if st.session_state.get('show_landing', True):
             unsafe_allow_html=True
         )
         
-        # Bouton recouvrant toute l'image
         if st.button("Entrer dans l'application", key="overlay_enter_btn"):
             st.session_state['show_landing'] = False
             st.rerun()
 
         st.markdown("<p style='text-align: center; color: #888; margin-top: 15px;'>👆 Cliquez sur l'image pour accéder aux compositions</p>", unsafe_allow_html=True)
     else:
-        st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`). Enregistre l'image sous le nom `{IMAGE_PATH}` dans le même dossier.")
+        st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`).")
         if st.button("🚀 ENTRER DANS L'APPLICATION", type="primary"):
             st.session_state['show_landing'] = False
             st.rerun()
@@ -229,10 +219,9 @@ if st.session_state.get('show_landing', True):
     st.stop()
 
 # ==========================================
-# ⚽ INTERFACE PRINCIPALE (COMPOS & GESTION)
+# ⚽ FUNCTIONS DU TERRAIN & DIALOGS
 # ==========================================
 
-# --- GÉNÉRATION DES CARTES JOUEURS ---
 def create_player_card(card_path, player_name):
     if not os.path.exists(card_path):
         return None
@@ -261,13 +250,11 @@ def create_player_card(card_path, player_name):
     
     return card_img
 
-# --- DESSIN DU TERRAIN (AVEC SUPPORT DES CARTE JAUNES POUR JOKERS) ---
 def draw_combined_field(t1, t2):
     fig, ax = plt.subplots(figsize=(10, 6.5))
     fig.patch.set_facecolor('#226343')
     ax.set_facecolor('#226343')
     
-    # Lignes du terrain
     ax.plot([0, 100, 100, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
     ax.plot([50, 50], [0, 60], color='white', linewidth=2.0)
     center_circle = patches.Circle((50, 30), 9, edgecolor='white', facecolor='none', linewidth=1.5)
@@ -335,7 +322,6 @@ def draw_combined_field(t1, t2):
     plt.tight_layout()
     return fig
 
-# --- POP-UP DES COMPOSITIONS ---
 @st.dialog("Compositions du Match", width="large")
 def show_teams_popup(t1, t2):
     st.write("Match équilibré généré avec succès ! 📸")
@@ -360,11 +346,16 @@ def show_teams_popup(t1, t2):
         
     st.markdown("**📋 Texte à copier pour WhatsApp (Noms uniquement) :**")
     st.code(text_whatsapp, language="text")
-    if st.button("Fermer"): st.rerun()
+    if st.button("Fermer"): 
+        st.rerun()
 
-# --- DIALOGUE / POP-UP SAISIE DES JOKERS ---
 @st.dialog("🃏 Saisie des Joueurs Jokers", width="medium")
-def add_jokers_dialog(nb_missing, selected_players_df, j1, j2):
+def add_jokers_dialog():
+    nb_missing = st.session_state.jokers_info['nb_missing']
+    selected_players_df = st.session_state.jokers_info['selected_players']
+    j1 = st.session_state.jokers_info['j1']
+    j2 = st.session_state.jokers_info['j2']
+
     st.write(f"Il manque **{nb_missing}** joueur(s) pour atteindre 10. Renseignez leurs prénoms et notes :")
     
     jokers_input = []
@@ -381,7 +372,6 @@ def add_jokers_dialog(nb_missing, selected_players_df, j1, j2):
         submit_jokers = st.form_submit_button("⚡ Valider et Générer avec les Jokers", type="primary")
         
     if submit_jokers:
-        # Création des DataFrames des jokers temporaires (non enregistrés en BDD)
         jokers_rows = []
         for j_name, j_score in jokers_input:
             formatted_star = f"{j_score} ⭐"
@@ -397,7 +387,6 @@ def add_jokers_dialog(nb_missing, selected_players_df, j1, j2):
             
         full_group_df = pd.concat([selected_players_df, pd.DataFrame(jokers_rows)], ignore_index=True)
         
-        # Algorithme d'équilibrage combinatoire avec les jokers
         players_list = full_group_df.to_dict(orient='records')
         best_diff = float('inf')
         best_team1, best_team2 = None, None
@@ -438,7 +427,9 @@ def add_jokers_dialog(nb_missing, selected_players_df, j1, j2):
         if valid_combo_found:
             st.session_state.last_team1 = best_team1
             st.session_state.last_team2 = best_team2
-            show_teams_popup(best_team1, best_team2)
+            st.session_state.open_teams_popup = True
+            st.session_state.show_jokers_modal = False
+            st.rerun()
 
 # --- EN-TÊTE PRINCIPAL ---
 col_logo, col_title, col_home = st.columns([1, 5, 1])
@@ -453,6 +444,14 @@ with col_home:
     if st.button("🏠 Accueil"):
         st.session_state['show_landing'] = True
         st.rerun()
+
+# --- GESTION DES POP-UPS DEPUIS LE FLUX PRINCIPAL ---
+if st.session_state.get("show_jokers_modal", False):
+    add_jokers_dialog()
+
+if st.session_state.get("open_teams_popup", False):
+    st.session_state.open_teams_popup = False
+    show_teams_popup(st.session_state.last_team1, st.session_state.last_team2)
 
 tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
 
@@ -637,10 +636,15 @@ with tab1:
         
         if st.button("⚡ Générer l'Équilibrage Parfait", type="primary"):
             if nb_selected < 10:
-                # Ouvre le dialogue de saisie des jokers si moins de 10 joueurs
-                add_jokers_dialog(10 - nb_selected, selected_players, j1, j2)
+                st.session_state.jokers_info = {
+                    'nb_missing': 10 - nb_selected,
+                    'selected_players': selected_players,
+                    'j1': j1,
+                    'j2': j2
+                }
+                st.session_state.show_jokers_modal = True
+                st.rerun()
             else:
-                # Génération directe pour 10 joueurs réguliers
                 players_list = selected_players.to_dict(orient='records')
                 best_diff = float('inf')
                 best_team1, best_team2 = None, None
@@ -683,7 +687,8 @@ with tab1:
                 else:
                     st.session_state.last_team1 = best_team1
                     st.session_state.last_team2 = best_team2
-                    show_teams_popup(best_team1, best_team2)
+                    st.session_state.open_teams_popup = True
+                    st.rerun()
 
     if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
         st.write("---")
@@ -778,7 +783,6 @@ with tab2:
     st.write("---")
     st.subheader("📝 Modification et édition directe de l'effectif")
     
-    # BOUTON ENREGISTRER PLACÉ EN HAUT
     btn_save_top = st.button("💾 Enregistrer les modifications", type="primary", key="save_btn_top")
     
     df_to_edit = st.session_state.players_df.copy()
