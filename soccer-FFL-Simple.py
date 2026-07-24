@@ -169,6 +169,8 @@ def save_data(df):
     clean_df = df.copy()
     if "Note Globale" in clean_df.columns:
         clean_df = clean_df.drop(columns=["Note Globale"])
+    if "is_joker" in clean_df.columns:
+        clean_df = clean_df.drop(columns=["is_joker"])
         
     for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
         if col in clean_df.columns:
@@ -278,8 +280,8 @@ def draw_combined_field(t1, t2):
     for i, row in players1.iterrows():
         if i >= len(pos1): break
         x, y = pos1[i]
-        p_name = row['Nom du Joueur']
-        is_joker = row.get('is_joker', False)
+        p_name = str(row['Nom du Joueur'])
+        is_joker = bool(row.get('is_joker', False))
         
         card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else BLUE_CARD_PATH
         card_img = create_player_card(card_file, p_name)
@@ -300,8 +302,8 @@ def draw_combined_field(t1, t2):
     for i, row in players2.iterrows():
         if i >= len(pos2): break
         x, y = pos2[i]
-        p_name = row['Nom du Joueur']
-        is_joker = row.get('is_joker', False)
+        p_name = str(row['Nom du Joueur'])
+        is_joker = bool(row.get('is_joker', False))
         
         card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else RED_CARD_PATH
         card_img = create_player_card(card_file, p_name)
@@ -352,7 +354,9 @@ def show_teams_popup(t1, t2):
 @st.dialog("🃏 Saisie des Joueurs Jokers", width="medium")
 def add_jokers_dialog():
     nb_missing = st.session_state.jokers_info['nb_missing']
-    selected_players_df = st.session_state.jokers_info['selected_players']
+    selected_players_df = st.session_state.jokers_info['selected_players'].copy()
+    selected_players_df['is_joker'] = False  # Forcer explicitement à False pour la BDD
+    
     j1 = st.session_state.jokers_info['j1']
     j2 = st.session_state.jokers_info['j2']
 
@@ -382,7 +386,7 @@ def add_jokers_dialog():
                 "Gardien": formatted_star,
                 "Collectif": formatted_star,
                 "Surnoms": "",
-                "is_joker": True
+                "is_joker": True  # Seuls ces joueurs sont marqués comme Joker
             })
             
         full_group_df = pd.concat([selected_players_df, pd.DataFrame(jokers_rows)], ignore_index=True)
@@ -615,7 +619,7 @@ with tab1:
                 else:
                     st.session_state.auto_selected.discard(name3)
                 
-    selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)]
+    selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)].copy()
     nb_selected = len(selected_players)
     
     if nb_selected == 10:
@@ -645,6 +649,7 @@ with tab1:
                 st.session_state.show_jokers_modal = True
                 st.rerun()
             else:
+                selected_players['is_joker'] = False
                 players_list = selected_players.to_dict(orient='records')
                 best_diff = float('inf')
                 best_team1, best_team2 = None, None
@@ -699,7 +704,8 @@ with tab1:
             st.markdown("**🔵 Équipe 1**")
             t1_display = st.session_state.last_team1.copy()
             t1_display["Note Globale"] = t1_display.apply(calculate_global_score, axis=1)
-            st.dataframe(t1_display[["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"]], hide_index=True)
+            display_cols = [c for c in ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"] if c in t1_display.columns]
+            st.dataframe(t1_display[display_cols], hide_index=True)
             
             t1 = st.session_state.last_team1
             att1 = t1['Attaque'].apply(text_to_score).sum()
@@ -720,7 +726,8 @@ with tab1:
             st.markdown("**🔴 Équipe 2**")
             t2_display = st.session_state.last_team2.copy()
             t2_display["Note Globale"] = t2_display.apply(calculate_global_score, axis=1)
-            st.dataframe(t2_display[["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"]], hide_index=True)
+            display_cols = [c for c in ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"] if c in t2_display.columns]
+            st.dataframe(t2_display[display_cols], hide_index=True)
             
             t2 = st.session_state.last_team2
             att2 = t2['Attaque'].apply(text_to_score).sum()
@@ -788,6 +795,8 @@ with tab2:
     df_to_edit = st.session_state.players_df.copy()
     if "Note Globale" in df_to_edit.columns:
         df_to_edit = df_to_edit.drop(columns=["Note Globale"])
+    if "is_joker" in df_to_edit.columns:
+        df_to_edit = df_to_edit.drop(columns=["is_joker"])
 
     for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
         if col in df_to_edit.columns:
@@ -835,6 +844,8 @@ with tab2:
         export_df = st.session_state.players_df.copy()
         if "Note Globale" in export_df.columns:
             export_df = export_df.drop(columns=["Note Globale"])
+        if "is_joker" in export_df.columns:
+            export_df = export_df.drop(columns=["is_joker"])
             
         export_df.to_excel(excel_buffer, index=False)
         excel_buffer.seek(0)
@@ -860,6 +871,8 @@ with tab2:
                     
                     if "Note Globale" in new_df.columns:
                         new_df = new_df.drop(columns=["Note Globale"])
+                    if "is_joker" in new_df.columns:
+                        new_df = new_df.drop(columns=["is_joker"])
                         
                     for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
                         new_df[col] = new_df[col].apply(format_star_option)
