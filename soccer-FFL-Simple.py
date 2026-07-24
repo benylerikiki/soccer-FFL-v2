@@ -115,28 +115,25 @@ st.markdown(
 if 'show_landing' not in st.session_state:
     st.session_state['show_landing'] = True
 
-TEXT_OPTIONS = [f"{i} ⭐" for i in range(1, 11)]
+NUMERIC_OPTIONS = list(range(1, 11))
 
-def text_to_score(text_value):
-    if pd.isna(text_value):
+def text_to_score(val):
+    """ Convertit n'importe quelle valeur en entier strict entre 1 et 10 """
+    if pd.isna(val):
         return 5
-    match = re.search(r'\d+', str(text_value))
+    match = re.search(r'\d+', str(val))
     if match:
-        val = int(match.group())
-        return max(1, min(10, val))
+        return max(1, min(10, int(match.group())))
     return 5
 
-def format_star_option(val):
-    score = text_to_score(val)
-    return f"{score} ⭐"
-
 def calculate_global_score(row):
+    """ Calcule la moyenne numérique directe des 4 compétences """
     att = text_to_score(row.get("Attaque", 5))
     defe = text_to_score(row.get("Défense", 5))
     gk = text_to_score(row.get("Gardien", 5))
     col = text_to_score(row.get("Collectif", 5))
     avg = (att + defe + gk + col) / 4.0
-    return f"{avg:.1f} ⭐"
+    return round(avg, 1)
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -145,23 +142,24 @@ def load_data():
             if "Surnoms" not in df.columns:
                 df["Surnoms"] = ""
             if "Gardien" not in df.columns:
-                df["Gardien"] = "5 ⭐"
+                df["Gardien"] = 5
                 
             df["Surnoms"] = df["Surnoms"].fillna("")
             
+            # Conversion forcée en entiers
             for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
                 if col in df.columns:
-                    df[col] = df[col].apply(format_star_option)
+                    df[col] = df[col].apply(text_to_score)
             return df
         except Exception: 
             pass
             
     return pd.DataFrame({
         "Nom du Joueur": ["Antho", "Cyril V", "Apou", "Benoit", "Nico P", "Mouyss", "Cédric", "Nico M", "David", "Cyril L"],
-        "Attaque": ["9 ⭐", "5 ⭐", "7 ⭐", "9 ⭐", "5 ⭐", "7 ⭐", "3 ⭐", "7 ⭐", "5 ⭐", "3 ⭐"],
-        "Défense": ["5 ⭐", "9 ⭐", "5 ⭐", "3 ⭐", "9 ⭐", "3 ⭐", "9 ⭐", "5 ⭐", "7 ⭐", "7 ⭐"],
-        "Gardien": ["3 ⭐", "5 ⭐", "7 ⭐", "3 ⭐", "7 ⭐", "5 ⭐", "9 ⭐", "3 ⭐", "5 ⭐", "5 ⭐"],
-        "Collectif": ["7 ⭐", "9 ⭐", "7 ⭐", "5 ⭐", "7 ⭐", "5 ⭐", "7 ⭐", "5 ⭐", "5 ⭐", "5 ⭐"],
+        "Attaque": [9, 5, 7, 9, 5, 7, 3, 7, 5, 3],
+        "Défense": [5, 9, 5, 3, 9, 3, 9, 5, 7, 7],
+        "Gardien": [3, 5, 7, 3, 7, 5, 9, 3, 5, 5],
+        "Collectif": [7, 9, 7, 5, 7, 5, 7, 5, 5, 5],
         "Surnoms": ["", "Cyril", "", "beny", "nicop, nico", "mouys", "", "nicom, nico", "Dav, dimeh", "Cyril"]
     })
 
@@ -172,9 +170,10 @@ def save_data(df):
     if "is_joker" in clean_df.columns:
         clean_df = clean_df.drop(columns=["is_joker"])
         
+    # S'assure que seules des valeurs numériques pures sont enregistrées
     for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
         if col in clean_df.columns:
-            clean_df[col] = clean_df[col].apply(format_star_option)
+            clean_df[col] = clean_df[col].apply(text_to_score)
             
     ordered_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
     existing_cols = [c for c in ordered_cols if c in clean_df.columns]
@@ -221,7 +220,7 @@ if st.session_state.get('show_landing', True):
     st.stop()
 
 # ==========================================
-# ⚽ FUNCTIONS DU TERRAIN & DIALOGS
+# ⚽ FONCTIONS DU TERRAIN & DIALOGS
 # ==========================================
 
 def create_player_card(card_path, player_name):
@@ -355,7 +354,7 @@ def show_teams_popup(t1, t2):
 def add_jokers_dialog():
     nb_missing = st.session_state.jokers_info['nb_missing']
     selected_players_df = st.session_state.jokers_info['selected_players'].copy()
-    selected_players_df['is_joker'] = False  # Forcer explicitement à False pour la BDD
+    selected_players_df['is_joker'] = False
     
     j1 = st.session_state.jokers_info['j1']
     j2 = st.session_state.jokers_info['j2']
@@ -378,15 +377,15 @@ def add_jokers_dialog():
     if submit_jokers:
         jokers_rows = []
         for j_name, j_score in jokers_input:
-            formatted_star = f"{j_score} ⭐"
+            num_score = text_to_score(j_score)
             jokers_rows.append({
                 "Nom du Joueur": f"Joker {j_name}" if not j_name.startswith("Joker") else j_name,
-                "Attaque": formatted_star,
-                "Défense": formatted_star,
-                "Gardien": formatted_star,
-                "Collectif": formatted_star,
+                "Attaque": num_score,
+                "Défense": num_score,
+                "Gardien": num_score,
+                "Collectif": num_score,
                 "Surnoms": "",
-                "is_joker": True  # Seuls ces joueurs sont marqués comme Joker
+                "is_joker": True
             })
             
         full_group_df = pd.concat([selected_players_df, pd.DataFrame(jokers_rows)], ignore_index=True)
@@ -558,10 +557,10 @@ with tab1:
         else:
             with st.form(f"form_quick_add_{current_unknown}"):
                 new_clean_name = st.text_input("Nom officiel pour la BDD", value=current_unknown)
-                att_l = st.selectbox("Attaque", options=TEXT_OPTIONS, index=4)
-                def_l = st.selectbox("Défense", options=TEXT_OPTIONS, index=4)
-                gk_l  = st.selectbox("Gardien", options=TEXT_OPTIONS, index=4)
-                col_l = st.selectbox("Collectif", options=TEXT_OPTIONS, index=4)
+                att_l = st.selectbox("Attaque", options=NUMERIC_OPTIONS, index=4)
+                def_l = st.selectbox("Défense", options=NUMERIC_OPTIONS, index=4)
+                gk_l  = st.selectbox("Gardien", options=NUMERIC_OPTIONS, index=4)
+                col_l = st.selectbox("Collectif", options=NUMERIC_OPTIONS, index=4)
                 
                 if st.form_submit_button("💾 Enregistrer et Cocher"):
                     if new_clean_name.strip():
@@ -753,10 +752,10 @@ with tab2:
         with st.expander("➕ Ajouter un nouveau joueur"):
             with st.form("form_add"):
                 name = st.text_input("Nom / Pseudo du joueur")
-                att_label = st.selectbox("Niveau en Attaque", options=TEXT_OPTIONS, index=4)
-                def_label = st.selectbox("Niveau en Défense", options=TEXT_OPTIONS, index=4)
-                gk_label  = st.selectbox("Niveau en Gardien", options=TEXT_OPTIONS, index=4)
-                col_label = st.selectbox("Niveau en Collectif", options=TEXT_OPTIONS, index=4)
+                att_label = st.selectbox("Niveau en Attaque (1-10)", options=NUMERIC_OPTIONS, index=4)
+                def_label = st.selectbox("Niveau en Défense (1-10)", options=NUMERIC_OPTIONS, index=4)
+                gk_label  = st.selectbox("Niveau en Gardien (1-10)", options=NUMERIC_OPTIONS, index=4)
+                col_label = st.selectbox("Niveau en Collectif (1-10)", options=NUMERIC_OPTIONS, index=4)
                 surnames = st.text_input("Surnoms séparés par des virgules (Optionnel)", placeholder="ex: Nico, Nick")
                 
                 if st.form_submit_button("Ajouter le joueur"):
@@ -800,7 +799,7 @@ with tab2:
 
     for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
         if col in df_to_edit.columns:
-            df_to_edit[col] = df_to_edit[col].apply(format_star_option)
+            df_to_edit[col] = df_to_edit[col].apply(text_to_score)
 
     column_order = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
     df_to_edit = df_to_edit[[c for c in column_order if c in df_to_edit.columns]]
@@ -809,10 +808,10 @@ with tab2:
         df_to_edit, 
         column_config={
             "Nom du Joueur": st.column_config.TextColumn("Nom du Joueur", required=True),
-            "Attaque": st.column_config.SelectboxColumn("Attaque", options=TEXT_OPTIONS, required=True),
-            "Défense": st.column_config.SelectboxColumn("Défense", options=TEXT_OPTIONS, required=True),
-            "Gardien": st.column_config.SelectboxColumn("Gardien", options=TEXT_OPTIONS, required=True),
-            "Collectif": st.column_config.SelectboxColumn("Collectif", options=TEXT_OPTIONS, required=True),
+            "Attaque": st.column_config.SelectboxColumn("Attaque", options=NUMERIC_OPTIONS, required=True),
+            "Défense": st.column_config.SelectboxColumn("Défense", options=NUMERIC_OPTIONS, required=True),
+            "Gardien": st.column_config.SelectboxColumn("Gardien", options=NUMERIC_OPTIONS, required=True),
+            "Collectif": st.column_config.SelectboxColumn("Collectif", options=NUMERIC_OPTIONS, required=True),
             "Surnoms": st.column_config.TextColumn("Surnoms (séparés par des virgules)", help="Ex: Nico, Nick, Ptit Nico"),
         }, 
         hide_index=True, 
@@ -875,7 +874,7 @@ with tab2:
                         new_df = new_df.drop(columns=["is_joker"])
                         
                     for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
-                        new_df[col] = new_df[col].apply(format_star_option)
+                        new_df[col] = new_df[col].apply(text_to_score)
                         
                     st.session_state.players_df = new_df
                     save_data(new_df)
