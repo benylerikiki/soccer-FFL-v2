@@ -128,7 +128,7 @@ def text_to_score(val):
     return 5
 
 def text_to_gk_score(val):
-    """ Convertit une note de gardien en 0 ou 1 (>= 6 devient 1, < 6 devient 0) """
+    """ Convertit la note gardien : >=6 devient 1, <6 devient 0 """
     if pd.isna(val):
         return 0
     match = re.search(r'\d+', str(val))
@@ -148,12 +148,10 @@ def load_data():
                 
             df["Surnoms"] = df["Surnoms"].fillna("")
             
-            # Conversion des compétences
             for col in ["Attaque", "Défense", "Collectif"]:
                 if col in df.columns:
                     df[col] = df[col].apply(text_to_score)
             
-            # Conversion Gardien : <6 -> 0 et >=6 -> 1
             if "Gardien" in df.columns:
                 df["Gardien"] = df["Gardien"].apply(text_to_gk_score)
                 
@@ -165,7 +163,7 @@ def load_data():
         "Nom du Joueur": ["Antho", "Cyril V", "Apou", "Benoit", "Nico P", "Mouyss", "Cédric", "Nico M", "David", "Cyril L"],
         "Attaque": [9, 5, 7, 9, 5, 7, 3, 7, 5, 3],
         "Défense": [5, 9, 5, 3, 9, 3, 9, 5, 7, 7],
-        "Gardien": [0, 0, 1, 0, 1, 0, 1, 0, 0, 0], # Notes mises à jour (>=6 -> 1, <6 -> 0)
+        "Gardien": [0, 0, 1, 0, 1, 0, 1, 0, 0, 0],
         "Collectif": [7, 9, 7, 5, 7, 5, 7, 5, 5, 5],
         "Surnoms": ["", "Cyril", "", "beny", "nicop, nico", "mouys", "", "nicom, nico", "Dav, dimeh", "Cyril"]
     })
@@ -422,8 +420,8 @@ def add_jokers_dialog():
             df_t1 = pd.DataFrame(t1)
             df_t2 = pd.DataFrame(t2)
             
-            t1_gk_sum  = df_t1['Gardien'].apply(text_to_gk_score).sum()
-            t2_gk_sum  = df_t2['Gardien'].apply(text_to_gk_score).sum()
+            t1_gk_sum = df_t1['Gardien'].apply(text_to_gk_score).sum()
+            t2_gk_sum = df_t2['Gardien'].apply(text_to_gk_score).sum()
             gk_diff = abs(t1_gk_sum - t2_gk_sum)
             
             t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
@@ -436,7 +434,6 @@ def add_jokers_dialog():
             
             field_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_col_sum - t2_col_sum)
             
-            # Priorité 1: Même nombre de gardiens (diff gardiens min). Priorité 2: Différence globale min.
             if (gk_diff < best_gk_diff) or (gk_diff == best_gk_diff and field_diff < best_diff):
                 best_gk_diff = gk_diff
                 best_diff = field_diff
@@ -464,7 +461,7 @@ with col_home:
         st.session_state['show_landing'] = True
         st.rerun()
 
-# --- GESTION DES POP-UPS DEPUIS LE FLUX PRINCIPAL ---
+# --- GESTION DES POP-UPS ---
 if st.session_state.get("show_jokers_modal", False):
     add_jokers_dialog()
 
@@ -484,8 +481,6 @@ with tab1:
                 if match:
                     raw_presents = match.group(1).split("\n")[0]
                     cleaned_line = re.sub(r"\(\s*\d+\s*\)", "", raw_presents)
-                    
-                    # Correction de la syntaxe ici :
                     extracted_names = [n.strip() for n in re.split(r"[, ]+", cleaned_line) if n.strip()]
                     
                     df_db = st.session_state.players_df
@@ -527,3 +522,153 @@ with tab1:
                     st.error("Impossible de trouver la section 'Présents :' dans le texte collé.")
             else:
                 st.warning("Veuillez coller un texte de convocation.")
+
+    if st.session_state.get("unknown_names"):
+        st.warning(f"⚠️ Joueurs non reconnus dans la base : {', '.join(st.session_state.unknown_names)}")
+    if st.session_state.get("ambiguous_matches"):
+        st.info("ℹ️ Surnoms ambigus détectés. Veuillez ajuster manuellement votre sélection ci-dessous.")
+
+    st.subheader("Sélectionnez les joueurs présents :")
+    df_players = st.session_state.players_df
+    selected_names = set()
+    
+    cols = st.columns(3)
+    for idx, row in df_players.iterrows():
+        p_name = row["Nom du Joueur"]
+        is_default = p_name in st.session_state.auto_selected
+        with cols[idx % 3]:
+            if st.checkbox(p_name, value=is_default, key=f"chk_{p_name}"):
+                selected_names.add(p_name)
+                
+    st.write(f"**Nombre de joueurs sélectionnés :** {len(selected_names)}")
+    
+    st.markdown("---")
+    st.subheader("Incompatibilités (Optionnel)")
+    col_j1, col_j2 = st.columns(2)
+    
+    all_player_names = df_players["Nom du Joueur"].tolist()
+    with col_j1:
+        j1 = st.selectbox("Joueur 1", ["Aucune restriction"] + all_player_names, key="j1_select")
+    with col_j2:
+        j2 = st.selectbox("Ne doit pas jouer avec Joueur 2", ["Aucun"] + all_player_names, key="j2_select")
+
+    if st.button("⚽ Générer les Équipes Équilibrées", type="primary"):
+        selected_df = df_players[df_players["Nom du Joueur"].isin(selected_names)].copy()
+        nb_selected = len(selected_df)
+        
+        if nb_selected < 10:
+            st.session_state.jokers_info = {
+                'nb_missing': 10 - nb_selected,
+                'selected_players': selected_df,
+                'j1': j1,
+                'j2': j2
+            }
+            st.session_state.show_jokers_modal = True
+            st.rerun()
+            
+        elif nb_selected > 10:
+            st.error("Veuillez sélectionner exactement 10 joueurs (ou moins si vous utilisez des jokers).")
+        else:
+            selected_df['is_joker'] = False
+            players_list = selected_df.to_dict(orient='records')
+            
+            best_diff = float('inf')
+            best_gk_diff = float('inf')
+            best_team1, best_team2 = None, None
+            valid_combo_found = False
+            
+            for combo in itertools.combinations(players_list, 5):
+                t1 = list(combo)
+                t2 = [p for p in players_list if p not in t1]
+                
+                names_t1 = [p['Nom du Joueur'] for p in t1]
+                names_t2 = [p['Nom du Joueur'] for p in t2]
+                
+                if j1 != "Aucune restriction" and j2 != "Aucun":
+                    if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
+                        continue
+                
+                valid_combo_found = True
+                df_t1 = pd.DataFrame(t1)
+                df_t2 = pd.DataFrame(t2)
+                
+                t1_gk_sum = df_t1['Gardien'].apply(text_to_gk_score).sum()
+                t2_gk_sum = df_t2['Gardien'].apply(text_to_gk_score).sum()
+                gk_diff = abs(t1_gk_sum - t2_gk_sum)
+                
+                t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
+                t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
+                t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
+                
+                t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
+                t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
+                t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
+                
+                field_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_col_sum - t2_col_sum)
+                
+                if (gk_diff < best_gk_diff) or (gk_diff == best_gk_diff and field_diff < best_diff):
+                    best_gk_diff = gk_diff
+                    best_diff = field_diff
+                    best_team1 = df_t1
+                    best_team2 = df_t2
+                    
+            if valid_combo_found:
+                st.session_state.last_team1 = best_team1
+                st.session_state.last_team2 = best_team2
+                st.session_state.open_teams_popup = True
+                st.rerun()
+            else:
+                st.error("Aucune combinaison valide trouvée respectant les restrictions demandées.")
+
+with tab2:
+    st.subheader("🏃 Gestion de la Base de Données")
+    
+    col_exp, col_imp = st.columns(2)
+    
+    with col_exp:
+        st.markdown("**📥 Exporter la base actuelle**")
+        output_buffer = io.BytesIO()
+        with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+            st.session_state.players_df.to_excel(writer, index=False)
+        output_buffer.seek(0)
+        
+        st.download_button(
+            label="⬇️ Télécharger la base (.xlsx)",
+            data=output_buffer,
+            file_name="database_joueurs_v2.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    with col_imp:
+        st.markdown("**📤 Importer un fichier Excel**")
+        uploaded_file = st.file_uploader("Charger un fichier .xlsx", type=["xlsx"])
+        if uploaded_file is not None:
+            try:
+                new_df = pd.read_excel(uploaded_file)
+                save_data(new_df)
+                st.session_state.players_df = load_data()
+                st.success("✅ Base de données mise à jour avec succès depuis le fichier !")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erreur lors de la lecture du fichier : {e}")
+
+    st.markdown("---")
+    
+    st.markdown("**✏️ Modifier directement dans le tableau :**")
+    edited_df = st.data_editor(
+        st.session_state.players_df,
+        num_rows="dynamic",
+        column_config={
+            "Attaque": st.column_config.SelectboxColumn("Attaque", options=NUMERIC_OPTIONS, default=5),
+            "Défense": st.column_config.SelectboxColumn("Défense", options=NUMERIC_OPTIONS, default=5),
+            "Gardien": st.column_config.SelectboxColumn("Gardien (0 ou 1)", options=GK_OPTIONS, default=0),
+            "Collectif": st.column_config.SelectboxColumn("Collectif", options=NUMERIC_OPTIONS, default=5),
+        },
+        key="data_editor"
+    )
+    
+    if st.button("💾 Enregistrer les modifications du tableau", type="primary"):
+        save_data(edited_df)
+        st.session_state.players_df = load_data()
+        st.success("Base de données enregistrée !")
+        st.rerun()
