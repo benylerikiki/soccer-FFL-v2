@@ -116,6 +116,7 @@ if 'show_landing' not in st.session_state:
     st.session_state['show_landing'] = True
 
 NUMERIC_OPTIONS = list(range(1, 11))
+GK_OPTIONS = [0, 1]
 
 def text_to_score(val):
     """ Convertit n'importe quelle valeur en entier strict entre 1 et 10 """
@@ -126,14 +127,15 @@ def text_to_score(val):
         return max(1, min(10, int(match.group())))
     return 5
 
-def calculate_global_score(row):
-    """ Calcule la moyenne numérique directe des 4 compétences """
-    att = text_to_score(row.get("Attaque", 5))
-    defe = text_to_score(row.get("Défense", 5))
-    gk = text_to_score(row.get("Gardien", 5))
-    col = text_to_score(row.get("Collectif", 5))
-    avg = (att + defe + gk + col) / 4.0
-    return round(avg, 1)
+def text_to_gk_score(val):
+    """ Convertit une note de gardien en 0 ou 1 (>= 6 devient 1, < 6 devient 0) """
+    if pd.isna(val):
+        return 0
+    match = re.search(r'\d+', str(val))
+    if match:
+        num = int(match.group())
+        return 1 if num >= 6 else 0
+    return 0
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -142,14 +144,19 @@ def load_data():
             if "Surnoms" not in df.columns:
                 df["Surnoms"] = ""
             if "Gardien" not in df.columns:
-                df["Gardien"] = 5
+                df["Gardien"] = 0
                 
             df["Surnoms"] = df["Surnoms"].fillna("")
             
-            # Conversion forcée en entiers
-            for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
+            # Conversion des compétences
+            for col in ["Attaque", "Défense", "Collectif"]:
                 if col in df.columns:
                     df[col] = df[col].apply(text_to_score)
+            
+            # Conversion Gardien : <6 -> 0 et >=6 -> 1
+            if "Gardien" in df.columns:
+                df["Gardien"] = df["Gardien"].apply(text_to_gk_score)
+                
             return df
         except Exception: 
             pass
@@ -158,7 +165,7 @@ def load_data():
         "Nom du Joueur": ["Antho", "Cyril V", "Apou", "Benoit", "Nico P", "Mouyss", "Cédric", "Nico M", "David", "Cyril L"],
         "Attaque": [9, 5, 7, 9, 5, 7, 3, 7, 5, 3],
         "Défense": [5, 9, 5, 3, 9, 3, 9, 5, 7, 7],
-        "Gardien": [3, 5, 7, 3, 7, 5, 9, 3, 5, 5],
+        "Gardien": [0, 0, 1, 0, 1, 0, 1, 0, 0, 0], # Notes mises à jour (>=6 -> 1, <6 -> 0)
         "Collectif": [7, 9, 7, 5, 7, 5, 7, 5, 5, 5],
         "Surnoms": ["", "Cyril", "", "beny", "nicop, nico", "mouys", "", "nicom, nico", "Dav, dimeh", "Cyril"]
     })
@@ -170,10 +177,12 @@ def save_data(df):
     if "is_joker" in clean_df.columns:
         clean_df = clean_df.drop(columns=["is_joker"])
         
-    # S'assure que seules des valeurs numériques pures sont enregistrées
-    for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
+    for col in ["Attaque", "Défense", "Collectif"]:
         if col in clean_df.columns:
             clean_df[col] = clean_df[col].apply(text_to_score)
+            
+    if "Gardien" in clean_df.columns:
+        clean_df["Gardien"] = clean_df["Gardien"].apply(text_to_gk_score)
             
     ordered_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
     existing_cols = [c for c in ordered_cols if c in clean_df.columns]
@@ -270,10 +279,10 @@ def draw_combined_field(t1, t2):
     card_width = 13.5
     card_height = 18.0
     
-    # Équipe 1 (Bleu / Jaune si Joker)
+    # Équipe 1
     pos1 = [(7, 30), (23, 13), (23, 47), (40, 17), (40, 43)]
     players1 = t1.copy()
-    players1['Gk_Num'] = players1['Gardien'].apply(text_to_score)
+    players1['Gk_Num'] = players1['Gardien'].apply(text_to_gk_score)
     players1 = players1.sort_values(by="Gk_Num", ascending=False).reset_index(drop=True)
     
     for i, row in players1.iterrows():
@@ -292,10 +301,10 @@ def draw_combined_field(t1, t2):
             ax.scatter(x, y, color=circle_color, s=350, edgecolors='white', linewidths=2.0, zorder=3)
             ax.text(x, y - 5.5, p_name, color='black' if is_joker else 'white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
         
-    # Équipe 2 (Rouge / Jaune si Joker)
+    # Équipe 2
     pos2 = [(93, 30), (77, 13), (77, 47), (60, 17), (60, 43)]
     players2 = t2.copy()
-    players2['Gk_Num'] = players2['Gardien'].apply(text_to_score)
+    players2['Gk_Num'] = players2['Gardien'].apply(text_to_gk_score)
     players2 = players2.sort_values(by="Gk_Num", ascending=False).reset_index(drop=True)
     
     for i, row in players2.iterrows():
@@ -365,24 +374,26 @@ def add_jokers_dialog():
     with st.form("form_jokers"):
         for k in range(nb_missing):
             st.markdown(f"**Joker {k+1}**")
-            col_j_name, col_j_score = st.columns([2, 1])
+            col_j_name, col_j_score, col_j_gk = st.columns([2, 1, 1])
             with col_j_name:
                 j_name = st.text_input(f"Prénom du Joker {k+1}", value=f"Joker {k+1}", key=f"j_name_{k}")
             with col_j_score:
                 j_score = st.number_input(f"Note (1 à 10)", min_value=1, max_value=10, value=5, key=f"j_score_{k}")
-            jokers_input.append((j_name.strip(), j_score))
+            with col_j_gk:
+                j_gk = st.selectbox(f"Gardien ?", options=[0, 1], index=0, key=f"j_gk_{k}")
+            jokers_input.append((j_name.strip(), j_score, j_gk))
         
         submit_jokers = st.form_submit_button("⚡ Valider et Générer avec les Jokers", type="primary")
         
     if submit_jokers:
         jokers_rows = []
-        for j_name, j_score in jokers_input:
+        for j_name, j_score, j_gk in jokers_input:
             num_score = text_to_score(j_score)
             jokers_rows.append({
                 "Nom du Joueur": f"Joker {j_name}" if not j_name.startswith("Joker") else j_name,
                 "Attaque": num_score,
                 "Défense": num_score,
-                "Gardien": num_score,
+                "Gardien": text_to_gk_score(j_gk),
                 "Collectif": num_score,
                 "Surnoms": "",
                 "is_joker": True
@@ -392,6 +403,7 @@ def add_jokers_dialog():
         
         players_list = full_group_df.to_dict(orient='records')
         best_diff = float('inf')
+        best_gk_diff = float('inf')
         best_team1, best_team2 = None, None
         valid_combo_found = False
         
@@ -410,20 +422,24 @@ def add_jokers_dialog():
             df_t1 = pd.DataFrame(t1)
             df_t2 = pd.DataFrame(t2)
             
+            t1_gk_sum  = df_t1['Gardien'].apply(text_to_gk_score).sum()
+            t2_gk_sum  = df_t2['Gardien'].apply(text_to_gk_score).sum()
+            gk_diff = abs(t1_gk_sum - t2_gk_sum)
+            
             t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
             t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
-            t1_gk_sum  = df_t1['Gardien'].apply(text_to_score).sum()
             t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
             
             t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
             t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
-            t2_gk_sum  = df_t2['Gardien'].apply(text_to_score).sum()
             t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
             
-            total_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_gk_sum - t2_gk_sum) + abs(t1_col_sum - t2_col_sum)
+            field_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_col_sum - t2_col_sum)
             
-            if total_diff < best_diff:
-                best_diff = total_diff
+            # Priorité 1: Même nombre de gardiens (diff gardiens min). Priorité 2: Différence globale min.
+            if (gk_diff < best_gk_diff) or (gk_diff == best_gk_diff and field_diff < best_diff):
+                best_gk_diff = gk_diff
+                best_diff = field_diff
                 best_team1 = df_t1
                 best_team2 = df_t2
                 
@@ -494,393 +510,4 @@ with tab1:
                                 ambiguous_matches.append({
                                     "convoc_name": raw_name,
                                     "candidates": candidates
-                                })
-                        else:
-                            unknown_names.append(raw_name)
-                    
-                    st.session_state.auto_selected = found_players
-                    st.session_state.unknown_names = unknown_names
-                    st.session_state.ambiguous_matches = ambiguous_matches
-                    
-                    if not unknown_names and not ambiguous_matches:
-                        st.success(f"✅ {len(found_players)} joueurs reconnus et cochés sans ambiguïté !")
-                        st.rerun()
-                else:
-                    st.error("Le mot 'Présents :' n'a pas été trouvé dans le texte.")
-            else:
-                st.error("Le texte est vide.")
-
-    if 'ambiguous_matches' in st.session_state and st.session_state.ambiguous_matches:
-        st.warning("⚠️ **Garde-fou : Surnom partagé par plusieurs joueurs**")
-        current_amb = st.session_state.ambiguous_matches[0]
-        convoc_n = current_amb.get("convoc_name", current_amb.get("convoc_n"))
-        candidates = current_amb["candidates"]
-        
-        st.markdown(f"Dans la convocation, le nom **'{convoc_n}'** peut correspondre à plusieurs joueurs de la base :")
-        selected_candidate = st.radio(
-            f"Qui est réellement '{convoc_n}' ?",
-            options=candidates,
-            key=f"amb_radio_{convoc_n}"
-        )
-        
-        if st.button(f"Confirmé : c'est {selected_candidate}"):
-            st.session_state.auto_selected.add(selected_candidate)
-            st.session_state.ambiguous_matches.pop(0)
-            st.rerun()
-
-    if ('ambiguous_matches' not in st.session_state or not st.session_state.ambiguous_matches) and ('unknown_names' in st.session_state and st.session_state.unknown_names):
-        st.info("💡 **Résolution des joueurs inconnus :**")
-        db_names = sorted(list(st.session_state.players_df["Nom du Joueur"].values))
-        current_unknown = st.session_state.unknown_names[0]
-        st.markdown(f"Le nom **'{current_unknown}'** de la convocation n'est pas reconnu.")
-        
-        choice = st.radio(
-            f"Que faire pour '{current_unknown}' ?", 
-            ["Associer ce surnom à un joueur existant dans la BDD", "Créer un tout nouveau joueur"], 
-            key=f"choice_{current_unknown}"
-        )
-        
-        if choice == "Associer ce surnom à un joueur existant dans la BDD":
-            linked_name = st.selectbox("Sélectionner le profil existant :", options=db_names)
-            if st.button(f"Associer '{current_unknown}' comme surnom de {linked_name}"):
-                idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == linked_name].index[0]
-                existing_surnames = str(st.session_state.players_df.loc[idx, "Surnoms"]).strip()
-                updated_surnames = f"{existing_surnames}, {current_unknown}" if existing_surnames else current_unknown
-                    
-                st.session_state.players_df.loc[idx, "Surnoms"] = updated_surnames
-                save_data(st.session_state.players_df)
-                
-                st.session_state.auto_selected.add(linked_name)
-                st.session_state.unknown_names.pop(0)
-                st.success(f"Surnom '{current_unknown}' enregistré pour {linked_name} !")
-                st.rerun()
-        else:
-            with st.form(f"form_quick_add_{current_unknown}"):
-                new_clean_name = st.text_input("Nom officiel pour la BDD", value=current_unknown)
-                att_l = st.selectbox("Attaque", options=NUMERIC_OPTIONS, index=4)
-                def_l = st.selectbox("Défense", options=NUMERIC_OPTIONS, index=4)
-                gk_l  = st.selectbox("Gardien", options=NUMERIC_OPTIONS, index=4)
-                col_l = st.selectbox("Collectif", options=NUMERIC_OPTIONS, index=4)
-                
-                if st.form_submit_button("💾 Enregistrer et Cocher"):
-                    if new_clean_name.strip():
-                        new_clean = new_clean_name.strip()
-                        new_p = pd.DataFrame({
-                            "Nom du Joueur": [new_clean], 
-                            "Attaque": [att_l], "Défense": [def_l], "Gardien": [gk_l], "Collectif": [col_l],
-                            "Surnoms": [current_unknown if new_clean != current_unknown else ""]
-                        })
-                        st.session_state.players_df = pd.concat([st.session_state.players_df, new_p], ignore_index=True)
-                        save_data(st.session_state.players_df)
-                        
-                        st.session_state.auto_selected.add(new_clean)
-                        st.session_state.unknown_names.pop(0)
-                        st.rerun()
-
-    st.write("---")
-    st.subheader("Sélection des présents")
-    
-    df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
-    counter_placeholder = st.empty()
-    selected_names = []
-    
-    for i in range(0, len(df_sorted), 3):
-        cols = st.columns(3)
-        row1 = df_sorted.iloc[i]
-        name1 = row1["Nom du Joueur"]
-        is_checked1 = name1 in st.session_state.auto_selected
-        with cols[0]:
-            if st.checkbox(name1, key=f"chk_{name1}_{i}", value=is_checked1): 
-                selected_names.append(name1)
-                st.session_state.auto_selected.add(name1)
-            else:
-                st.session_state.auto_selected.discard(name1)
-                
-        if i + 1 < len(df_sorted):
-            row2 = df_sorted.iloc[i + 1]
-            name2 = row2["Nom du Joueur"]
-            is_checked2 = name2 in st.session_state.auto_selected
-            with cols[1]:
-                if st.checkbox(name2, key=f"chk_{name2}_{i+1}", value=is_checked2): 
-                    selected_names.append(name2)
-                    st.session_state.auto_selected.add(name2)
-                else:
-                    st.session_state.auto_selected.discard(name2)
-                    
-        if i + 2 < len(df_sorted):
-            row3 = df_sorted.iloc[i + 2]
-            name3 = row3["Nom du Joueur"]
-            is_checked3 = name3 in st.session_state.auto_selected
-            with cols[2]:
-                if st.checkbox(name3, key=f"chk_{name3}_{i+2}", value=is_checked3): 
-                    selected_names.append(name3)
-                    st.session_state.auto_selected.add(name3)
-                else:
-                    st.session_state.auto_selected.discard(name3)
-                
-    selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)].copy()
-    nb_selected = len(selected_players)
-    
-    if nb_selected == 10:
-        counter_placeholder.success("✅ 10 joueurs sélectionnés ! Prêts à configurer les options.")
-    elif nb_selected > 10:
-        counter_placeholder.error(f"⚠️ Trop de joueurs sélectionnés ({nb_selected}/10). Veuillez en décocher {nb_selected - 10} !")
-    else:
-        counter_placeholder.info(f"🏃 Joueurs sélectionnés : {nb_selected} / 10 (Si < 10, des Jokers vous seront proposés)")
-        
-    st.write("---")
-    
-    if nb_selected <= 10 and nb_selected > 0:
-        st.markdown("### ⛔ Restriction d'affinité (Optionnel)")
-        j1 = st.selectbox("Sélectionner un joueur...", options=["Aucune restriction"] + sorted(selected_names), index=0)
-        remaining_options = [n for n in selected_names if n != j1] if j1 != "Aucune restriction" else []
-        j2 = st.selectbox("... à ne surtout pas faire jouer avec :", options=["Aucun"] + sorted(remaining_options), index=0) if j1 != "Aucune restriction" else "Aucun"
-        st.write("")
-        
-        if st.button("⚡ Générer l'Équilibrage Parfait", type="primary"):
-            if nb_selected < 10:
-                st.session_state.jokers_info = {
-                    'nb_missing': 10 - nb_selected,
-                    'selected_players': selected_players,
-                    'j1': j1,
-                    'j2': j2
-                }
-                st.session_state.show_jokers_modal = True
-                st.rerun()
-            else:
-                selected_players['is_joker'] = False
-                players_list = selected_players.to_dict(orient='records')
-                best_diff = float('inf')
-                best_team1, best_team2 = None, None
-                valid_combo_found = False
-                
-                for combo in itertools.combinations(players_list, 5):
-                    t1 = list(combo)
-                    t2 = [p for p in players_list if p not in t1]
-                    
-                    names_t1 = [p['Nom du Joueur'] for p in t1]
-                    names_t2 = [p['Nom du Joueur'] for p in t2]
-                    
-                    if j1 != "Aucune restriction" and j2 != "Aucun":
-                        if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
-                            continue
-                    
-                    valid_combo_found = True
-                    df_t1 = pd.DataFrame(t1)
-                    df_t2 = pd.DataFrame(t2)
-                    
-                    t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
-                    t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
-                    t1_gk_sum  = df_t1['Gardien'].apply(text_to_score).sum()
-                    t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
-                    
-                    t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
-                    t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
-                    t2_gk_sum  = df_t2['Gardien'].apply(text_to_score).sum()
-                    t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
-                    
-                    total_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_gk_sum - t2_gk_sum) + abs(t1_col_sum - t2_col_sum)
-                    
-                    if total_diff < best_diff:
-                        best_diff = total_diff
-                        best_team1 = df_t1
-                        best_team2 = df_t2
-                
-                if not valid_combo_found:
-                    st.error("Impossible de générer les équipes avec cette contrainte.")
-                else:
-                    st.session_state.last_team1 = best_team1
-                    st.session_state.last_team2 = best_team2
-                    st.session_state.open_teams_popup = True
-                    st.rerun()
-
-    if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
-        st.write("---")
-        st.markdown("### 📊 Dernières équipes générées")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**🔵 Équipe 1**")
-            t1_display = st.session_state.last_team1.copy()
-            t1_display["Note Globale"] = t1_display.apply(calculate_global_score, axis=1)
-            display_cols = [c for c in ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"] if c in t1_display.columns]
-            st.dataframe(t1_display[display_cols], hide_index=True)
-            
-            t1 = st.session_state.last_team1
-            att1 = t1['Attaque'].apply(text_to_score).sum()
-            def1 = t1['Défense'].apply(text_to_score).sum()
-            gk1  = t1['Gardien'].apply(text_to_score).sum()
-            col1 = t1['Collectif'].apply(text_to_score).sum()
-            
-            st.caption(f"Attaque ({att1}/50)")
-            st.progress(att1 / 50)
-            st.caption(f"Défense ({def1}/50)")
-            st.progress(def1 / 50)
-            st.caption(f"Gardien ({gk1}/50)")
-            st.progress(gk1 / 50)
-            st.caption(f"Collectif ({col1}/50)")
-            st.progress(col1 / 50)
-
-        with c2:
-            st.markdown("**🔴 Équipe 2**")
-            t2_display = st.session_state.last_team2.copy()
-            t2_display["Note Globale"] = t2_display.apply(calculate_global_score, axis=1)
-            display_cols = [c for c in ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"] if c in t2_display.columns]
-            st.dataframe(t2_display[display_cols], hide_index=True)
-            
-            t2 = st.session_state.last_team2
-            att2 = t2['Attaque'].apply(text_to_score).sum()
-            def2 = t2['Défense'].apply(text_to_score).sum()
-            gk2  = t2['Gardien'].apply(text_to_score).sum()
-            col2 = t2['Collectif'].apply(text_to_score).sum()
-            
-            st.caption(f"Attaque ({att2}/50)")
-            st.progress(att2 / 50)
-            st.caption(f"Défense ({def2}/50)")
-            st.progress(def2 / 50)
-            st.caption(f"Gardien ({gk2}/50)")
-            st.progress(gk2 / 50)
-            st.caption(f"Collectif ({col2}/50)")
-            st.progress(col2 / 50)
-
-with tab2:
-    st.header("Gestion de la base des joueurs")
-    
-    col_add, col_del = st.columns(2)
-    
-    with col_add:
-        with st.expander("➕ Ajouter un nouveau joueur"):
-            with st.form("form_add"):
-                name = st.text_input("Nom / Pseudo du joueur")
-                att_label = st.selectbox("Niveau en Attaque (1-10)", options=NUMERIC_OPTIONS, index=4)
-                def_label = st.selectbox("Niveau en Défense (1-10)", options=NUMERIC_OPTIONS, index=4)
-                gk_label  = st.selectbox("Niveau en Gardien (1-10)", options=NUMERIC_OPTIONS, index=4)
-                col_label = st.selectbox("Niveau en Collectif (1-10)", options=NUMERIC_OPTIONS, index=4)
-                surnames = st.text_input("Surnoms séparés par des virgules (Optionnel)", placeholder="ex: Nico, Nick")
-                
-                if st.form_submit_button("Ajouter le joueur"):
-                    if name.strip() and name.strip() not in st.session_state.players_df["Nom du Joueur"].values:
-                        new_player = pd.DataFrame({
-                            "Nom du Joueur": [name.strip()], 
-                            "Attaque": [att_label], "Défense": [def_label], "Gardien": [gk_label], "Collectif": [col_label],
-                            "Surnoms": [surnames.strip()]
-                        })
-                        st.session_state.players_df = pd.concat([st.session_state.players_df, new_player], ignore_index=True)
-                        save_data(st.session_state.players_df)
-                        st.success(f"✅ {name.strip()} ajouté dans la base Excel !")
-                        st.rerun()
-                    else:
-                        st.error("Le nom est vide ou existe déjà.")
-
-    with col_del:
-        with st.expander("🗑️ Supprimer un joueur de la BDD"):
-            all_players = sorted(list(st.session_state.players_df["Nom du Joueur"].values))
-            if all_players:
-                player_to_delete = st.selectbox("Sélectionner le joueur à supprimer :", options=all_players)
-                if st.button("🗑️ Supprimer définitivement", type="secondary"):
-                    st.session_state.players_df = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] != player_to_delete].reset_index(drop=True)
-                    save_data(st.session_state.players_df)
-                    st.session_state.auto_selected.discard(player_to_delete)
-                    st.success(f"✅ {player_to_delete} a été supprimé de la base Excel !")
-                    st.rerun()
-            else:
-                st.info("Aucun joueur dans la base.")
-                    
-    st.write("---")
-    st.subheader("📝 Modification et édition directe de l'effectif")
-    
-    btn_save_top = st.button("💾 Enregistrer les modifications", type="primary", key="save_btn_top")
-    
-    df_to_edit = st.session_state.players_df.copy()
-    if "Note Globale" in df_to_edit.columns:
-        df_to_edit = df_to_edit.drop(columns=["Note Globale"])
-    if "is_joker" in df_to_edit.columns:
-        df_to_edit = df_to_edit.drop(columns=["is_joker"])
-
-    for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
-        if col in df_to_edit.columns:
-            df_to_edit[col] = df_to_edit[col].apply(text_to_score)
-
-    column_order = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
-    df_to_edit = df_to_edit[[c for c in column_order if c in df_to_edit.columns]]
-
-    edited_players = st.data_editor(
-        df_to_edit, 
-        column_config={
-            "Nom du Joueur": st.column_config.TextColumn("Nom du Joueur", required=True),
-            "Attaque": st.column_config.SelectboxColumn("Attaque", options=NUMERIC_OPTIONS, required=True),
-            "Défense": st.column_config.SelectboxColumn("Défense", options=NUMERIC_OPTIONS, required=True),
-            "Gardien": st.column_config.SelectboxColumn("Gardien", options=NUMERIC_OPTIONS, required=True),
-            "Collectif": st.column_config.SelectboxColumn("Collectif", options=NUMERIC_OPTIONS, required=True),
-            "Surnoms": st.column_config.TextColumn("Surnoms (séparés par des virgules)", help="Ex: Nico, Nick, Ptit Nico"),
-        }, 
-        hide_index=True, 
-        use_container_width=True
-    )
-
-    st.markdown("##### 📊 Aperçu des Notes Globales (Moyennes calculées)")
-    view_df = edited_players.copy()
-    view_df["Note Globale"] = view_df.apply(calculate_global_score, axis=1)
-    st.dataframe(view_df[["Nom du Joueur", "Note Globale"]], hide_index=True, use_container_width=True)
-
-    btn_save_bottom = st.button("💾 Enregistrer les modifications", type="primary", key="save_btn_bottom")
-
-    if btn_save_top or btn_save_bottom:
-        st.session_state.players_df = edited_players
-        save_data(edited_players)
-        st.success("✅ Fichier Excel sauvegardé avec succès !")
-        st.rerun()
-
-    st.write("---")
-
-    st.subheader("📥 / 📤 Import & Export de la Base Excel")
-    col_dl, col_ul = st.columns(2)
-    
-    with col_dl:
-        st.markdown("**1. Télécharger la BDD actuelle**")
-        excel_buffer = io.BytesIO()
-        
-        export_df = st.session_state.players_df.copy()
-        if "Note Globale" in export_df.columns:
-            export_df = export_df.drop(columns=["Note Globale"])
-        if "is_joker" in export_df.columns:
-            export_df = export_df.drop(columns=["is_joker"])
-            
-        export_df.to_excel(excel_buffer, index=False)
-        excel_buffer.seek(0)
-        
-        st.download_button(
-            label="💾 Télécharger database_joueurs_v2.xlsx",
-            data=excel_buffer,
-            file_name="database_joueurs_v2.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        
-    with col_ul:
-        st.markdown("**2. Remplacer avec un fichier Excel modifié**")
-        uploaded_file = st.file_uploader("Importer une nouvelle base (.xlsx)", type=["xlsx"])
-        if uploaded_file is not None:
-            try:
-                new_df = pd.read_excel(uploaded_file)
-                required_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif"]
-                if all(col in new_df.columns for col in required_cols):
-                    if "Surnoms" not in new_df.columns:
-                        new_df["Surnoms"] = ""
-                    new_df["Surnoms"] = new_df["Surnoms"].fillna("")
-                    
-                    if "Note Globale" in new_df.columns:
-                        new_df = new_df.drop(columns=["Note Globale"])
-                    if "is_joker" in new_df.columns:
-                        new_df = new_df.drop(columns=["is_joker"])
-                        
-                    for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
-                        new_df[col] = new_df[col].apply(text_to_score)
-                        
-                    st.session_state.players_df = new_df
-                    save_data(new_df)
-                    st.success("✅ Base de données mise à jour avec succès depuis le fichier téléversé !")
-                    st.rerun()
-                else:
-                    st.error("Le fichier importé doit contenir au moins les colonnes : Nom du Joueur, Attaque, Défense, Gardien, Collectif")
-            except Exception as e:
-                st.error(f"Erreur lors de la lecture du fichier Excel : {e}")
+                              
