@@ -484,6 +484,8 @@ with tab1:
                 if match:
                     raw_presents = match.group(1).split("\n")[0]
                     cleaned_line = re.sub(r"\(\s*\d+\s*\)", "", raw_presents)
+                    
+                    # Correction de la syntaxe ici :
                     extracted_names = [n.strip() for n in re.split(r"[, ]+", cleaned_line) if n.strip()]
                     
                     df_db = st.session_state.players_df
@@ -510,4 +512,18 @@ with tab1:
                                 ambiguous_matches.append({
                                     "convoc_name": raw_name,
                                     "candidates": candidates
-                              
+                                })
+                        else:
+                            unknown_names.append(raw_name)
+                    
+                    st.session_state.auto_selected = found_players
+                    st.session_state.unknown_names = unknown_names
+                    st.session_state.ambiguous_matches = ambiguous_matches
+                    
+                    if not unknown_names and not ambiguous_matches:
+                        st.success(f"✅ {len(found_players)} joueurs reconnus et cochés sans ambiguïté !")
+                        st.rerun()
+                else:
+                    st.error("Impossible de trouver la section 'Présents :' dans le texte collé.")
+            else:
+                st.warning("Veuillez coller un texte de convocation.")
