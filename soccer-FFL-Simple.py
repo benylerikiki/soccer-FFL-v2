@@ -119,7 +119,6 @@ NUMERIC_OPTIONS = list(range(1, 11))
 GK_OPTIONS = [0, 1]
 
 def text_to_score(val):
-    """ Convertit n'importe quelle valeur en entier strict entre 1 et 10 """
     if pd.isna(val):
         return 5
     match = re.search(r'\d+', str(val))
@@ -128,7 +127,6 @@ def text_to_score(val):
     return 5
 
 def text_to_gk_score(val):
-    """ Convertit la note gardien : >=6 devient 1, <6 devient 0 """
     if pd.isna(val):
         return 0
     match = re.search(r'\d+', str(val))
@@ -136,6 +134,14 @@ def text_to_gk_score(val):
         num = int(match.group())
         return 1 if num >= 6 else 0
     return 0
+
+def calculate_global_score(row):
+    """ Calcule la moyenne numérique des compétences terrain (Att, Def, Col) """
+    att = text_to_score(row.get("Attaque", 5))
+    defe = text_to_score(row.get("Défense", 5))
+    col = text_to_score(row.get("Collectif", 5))
+    avg = (att + defe + col) / 3.0
+    return round(avg, 1)
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -155,11 +161,13 @@ def load_data():
             if "Gardien" in df.columns:
                 df["Gardien"] = df["Gardien"].apply(text_to_gk_score)
                 
+            # Calcul de la note globale
+            df["Note Globale"] = df.apply(calculate_global_score, axis=1)
             return df
         except Exception: 
             pass
             
-    return pd.DataFrame({
+    df_default = pd.DataFrame({
         "Nom du Joueur": ["Antho", "Cyril V", "Apou", "Benoit", "Nico P", "Mouyss", "Cédric", "Nico M", "David", "Cyril L"],
         "Attaque": [9, 5, 7, 9, 5, 7, 3, 7, 5, 3],
         "Défense": [5, 9, 5, 3, 9, 3, 9, 5, 7, 7],
@@ -167,6 +175,8 @@ def load_data():
         "Collectif": [7, 9, 7, 5, 7, 5, 7, 5, 5, 5],
         "Surnoms": ["", "Cyril", "", "beny", "nicop, nico", "mouys", "", "nicom, nico", "Dav, dimeh", "Cyril"]
     })
+    df_default["Note Globale"] = df_default.apply(calculate_global_score, axis=1)
+    return df_default
 
 def save_data(df):
     clean_df = df.copy()
@@ -194,6 +204,9 @@ if 'players_df' not in st.session_state:
 
 if 'auto_selected' not in st.session_state:
     st.session_state.auto_selected = set()
+
+if 'jokers_list' not in st.session_state:
+    st.session_state.jokers_list = []
 
 # ==========================================
 # 🖼️ PAGE DE GARDE
@@ -239,7 +252,6 @@ def create_player_card(card_path, player_name):
     w, h = card_img.size
     
     y_pos = int(h * (2 / 3))
-    
     font_size = max(24, int(w * 0.18))
     try:
         font = ImageFont.truetype(FONT_PATH, font_size)
@@ -255,7 +267,6 @@ def create_player_card(card_path, player_name):
     
     stroke_w = max(2, int(font_size * 0.07))
     draw.text((x_pos, y_pos_centered), player_name.upper(), fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
-    
     return card_img
 
 def draw_combined_field(t1, t2):
@@ -358,7 +369,6 @@ def show_teams_popup(t1, t2):
         st.rerun()
 
 def compute_best_teams(players_list, j1, j2, same_team_players):
-    """ Calcule la meilleure composition d'équipes en tenant compte des filtres d'incompatibilité et de même équipe """
     best_diff = float('inf')
     best_gk_diff = float('inf')
     best_team1, best_team2 = None, None
@@ -371,14 +381,11 @@ def compute_best_teams(players_list, j1, j2, same_team_players):
         names_t1 = set(p['Nom du Joueur'] for p in t1)
         names_t2 = set(p['Nom du Joueur'] for p in t2)
         
-        # 1. Filtre Joueurs Forcés Ensemble
         if same_team_players:
             st_set = set(same_team_players)
-            # Les joueurs doivent être TOUS dans t1 OU TOUS dans t2
             if not (st_set.issubset(names_t1) or st_set.issubset(names_t2)):
                 continue
 
-        # 2. Filtre Incompatibilité
         if j1 != "Aucune restriction" and j2 != "Aucun":
             if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
                 continue
@@ -409,59 +416,6 @@ def compute_best_teams(players_list, j1, j2, same_team_players):
 
     return valid_combo_found, best_team1, best_team2
 
-@st.dialog("🃏 Saisie des Joueurs Jokers", width="medium")
-def add_jokers_dialog():
-    nb_missing = st.session_state.jokers_info['nb_missing']
-    selected_players_df = st.session_state.jokers_info['selected_players'].copy()
-    selected_players_df['is_joker'] = False
-    
-    j1 = st.session_state.jokers_info['j1']
-    j2 = st.session_state.jokers_info['j2']
-    same_team = st.session_state.jokers_info['same_team']
-
-    st.write(f"Il manque **{nb_missing}** joueur(s) pour atteindre 10. Renseignez leurs prénoms et notes :")
-    
-    jokers_input = []
-    with st.form("form_jokers"):
-        for k in range(nb_missing):
-            st.markdown(f"**Joker {k+1}**")
-            col_j_name, col_j_score, col_j_gk = st.columns([2, 1, 1])
-            with col_j_name:
-                j_name = st.text_input(f"Prénom du Joker {k+1}", value=f"Joker {k+1}", key=f"j_name_{k}")
-            with col_j_score:
-                j_score = st.number_input(f"Note (1 à 10)", min_value=1, max_value=10, value=5, key=f"j_score_{k}")
-            with col_j_gk:
-                j_gk = st.selectbox(f"Gardien ?", options=[0, 1], index=0, key=f"j_gk_{k}")
-            jokers_input.append((j_name.strip(), j_score, j_gk))
-        
-        submit_jokers = st.form_submit_button("⚡ Valider et Générer avec les Jokers", type="primary")
-        
-    if submit_jokers:
-        jokers_rows = []
-        for j_name, j_score, j_gk in jokers_input:
-            num_score = text_to_score(j_score)
-            jokers_rows.append({
-                "Nom du Joueur": f"Joker {j_name}" if not j_name.startswith("Joker") else j_name,
-                "Attaque": num_score,
-                "Défense": num_score,
-                "Gardien": text_to_gk_score(j_gk),
-                "Collectif": num_score,
-                "Surnoms": "",
-                "is_joker": True
-            })
-            
-        full_group_df = pd.concat([selected_players_df, pd.DataFrame(jokers_rows)], ignore_index=True)
-        players_list = full_group_df.to_dict(orient='records')
-        
-        valid_combo, best_t1, best_t2 = compute_best_teams(players_list, j1, j2, same_team)
-                
-        if valid_combo:
-            st.session_state.last_team1 = best_t1
-            st.session_state.last_team2 = best_t2
-            st.session_state.open_teams_popup = True
-            st.session_state.show_jokers_modal = False
-            st.rerun()
-
 # --- EN-TÊTE PRINCIPAL ---
 col_logo, col_title, col_home = st.columns([1, 5, 1])
 with col_logo:
@@ -476,10 +430,6 @@ with col_home:
         st.session_state['show_landing'] = True
         st.rerun()
 
-# --- GESTION DES POP-UPS ---
-if st.session_state.get("show_jokers_modal", False):
-    add_jokers_dialog()
-
 if st.session_state.get("open_teams_popup", False):
     st.session_state.open_teams_popup = False
     show_teams_popup(st.session_state.last_team1, st.session_state.last_team2)
@@ -488,7 +438,7 @@ tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
 
 with tab1:
     with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=False):
-        convoc_text = st.text_area("Colle le texte brut de ta convocation ici :", height=150, placeholder="Présents : nicoP (1) , dimeh(2)...")
+        convoc_text = st.text_area("Colle le texte brut de ta convocation ici :", height=150, placeholder="Présents : Nico P (1), Cyril V (2)...")
         
         if st.button("🔍 Extraire et Valider les Joueurs"):
             if convoc_text.strip():
@@ -496,7 +446,7 @@ with tab1:
                 if match:
                     raw_presents = match.group(1).split("\n")[0]
                     cleaned_line = re.sub(r"\(\s*\d+\s*\)", "", raw_presents)
-                    extracted_names = [n.strip() for n in re.split(r"[, ]+", cleaned_line) if n.strip()]
+                    raw_items = [item.strip() for item in re.split(r"[,;\n]+", cleaned_line) if item.strip()]
                     
                     df_db = st.session_state.players_df
                     alias_map = {}
@@ -512,19 +462,29 @@ with tab1:
                     unknown_names = []
                     ambiguous_matches = []
                     
-                    for raw_name in extracted_names:
-                        key = raw_name.lower()
+                    for raw_item in raw_items:
+                        key = raw_item.lower()
                         if key in alias_map:
                             candidates = alias_map[key]
                             if len(candidates) == 1:
                                 found_players.add(candidates[0])
                             else:
-                                ambiguous_matches.append({
-                                    "convoc_name": raw_name,
-                                    "candidates": candidates
-                                })
+                                ambiguous_matches.append({"convoc_name": raw_item, "candidates": candidates})
                         else:
-                            unknown_names.append(raw_name)
+                            sub_tokens = [t.strip() for t in raw_item.split() if t.strip()]
+                            matched_sub = False
+                            for token in sub_tokens:
+                                sub_key = token.lower()
+                                if sub_key in alias_map:
+                                    candidates = alias_map[sub_key]
+                                    if len(candidates) == 1:
+                                        found_players.add(candidates[0])
+                                        matched_sub = True
+                                    else:
+                                        ambiguous_matches.append({"convoc_name": token, "candidates": candidates})
+                                        matched_sub = True
+                            if not matched_sub:
+                                unknown_names.append(raw_item)
                     
                     st.session_state.auto_selected = found_players
                     st.session_state.unknown_names = unknown_names
@@ -539,11 +499,11 @@ with tab1:
                 st.warning("Veuillez coller un texte de convocation.")
 
     if st.session_state.get("unknown_names"):
-        st.warning(f"⚠️ Joueurs non reconnus dans la base : {', '.join(st.session_state.unknown_names)}")
+        st.warning(f"⚠️ Éléments non reconnus : {', '.join(st.session_state.unknown_names)}")
     if st.session_state.get("ambiguous_matches"):
-        st.info("ℹ️ Surnoms ambigus détectés. Veuillez ajuster manuellement votre sélection ci-dessous.")
+        st.info("ℹ️ Surnoms ambigus détectés. Veuillez ajuster la sélection ci-dessous.")
 
-    st.subheader("Sélectionnez les joueurs présents :")
+    st.subheader("1. Sélection des Joueurs Présents")
     df_players = st.session_state.players_df
     selected_names = set()
     
@@ -554,50 +514,80 @@ with tab1:
         with cols[idx % 3]:
             if st.checkbox(p_name, value=is_default, key=f"chk_{p_name}"):
                 selected_names.add(p_name)
-                
-    st.write(f"**Nombre de joueurs sélectionnés :** {len(selected_names)}")
-    
+
     st.markdown("---")
-    st.subheader("Restrictions & Affinités (Optionnel)")
+    st.subheader("2. Joueurs Jokers / Invités (Optionnel)")
     
-    # Sélecteur pour forcer des coéquipiers ensemble
-    all_selected_list = sorted(list(selected_names))
+    with st.expander("➕ Ajouter un joueur Joker / Invité", expanded=False):
+        with st.form("form_add_joker"):
+            col_jk1, col_jk2, col_jk3 = st.columns([2, 1, 1])
+            with col_jk1:
+                jk_name = st.text_input("Prénom du Joker", value="Joker")
+            with col_jk2:
+                jk_score = st.number_input("Note terrain (1 à 10)", min_value=1, max_value=10, value=5)
+            with col_jk3:
+                jk_gk = st.selectbox("Gardien ?", options=[0, 1], index=0)
+            
+            btn_add_joker = st.form_submit_button("➕ Ajouter ce Joker")
+            
+            if btn_add_joker:
+                clean_jk_name = f"Joker {jk_name.strip()}" if not jk_name.strip().startswith("Joker") else jk_name.strip()
+                st.session_state.jokers_list.append({
+                    "Nom du Joueur": clean_jk_name,
+                    "Attaque": text_to_score(jk_score),
+                    "Défense": text_to_score(jk_score),
+                    "Gardien": text_to_gk_score(jk_gk),
+                    "Collectif": text_to_score(jk_score),
+                    "Surnoms": "",
+                    "is_joker": True
+                })
+                st.success(f"Joker '{clean_jk_name}' ajouté !")
+                st.rerun()
+
+    if st.session_state.jokers_list:
+        st.markdown("**Jokers configurés pour ce match :**")
+        for jk_idx, jk_item in enumerate(st.session_state.jokers_list):
+            c_jk_text, c_jk_del = st.columns([4, 1])
+            with c_jk_text:
+                st.info(f"🃏 **{jk_item['Nom du Joueur']}** - Note: {jk_item['Attaque']}/10 | Gardien: {jk_item['Gardien']}")
+            with c_jk_del:
+                if st.button("❌", key=f"del_jk_{jk_idx}"):
+                    st.session_state.jokers_list.pop(jk_idx)
+                    st.rerun()
+
+    all_active_players = list(selected_names) + [j["Nom du Joueur"] for j in st.session_state.jokers_list]
+    total_count = len(all_active_players)
+    st.markdown(f"**Nombre total de joueurs retenus pour le match :** `{total_count} / 10`")
+
+    st.markdown("---")
+    st.subheader("3. Restrictions & Affinités (Sur tous les joueurs présents)")
+    
     same_team_players = st.multiselect(
         "🤝 Joueurs à Mettre IMPÉRATIVEMENT dans la MÊME ÉQUIPE :",
-        options=all_selected_list,
-        help="Sélectionne 2 joueurs ou plus qui doivent être placés dans la même équipe."
+        options=all_active_players,
+        help="Sélectionne 2 joueurs ou plus qui doivent impérativement jouer ensemble."
     )
     
     col_j1, col_j2 = st.columns(2)
-    all_player_names = df_players["Nom du Joueur"].tolist()
     with col_j1:
-        j1 = st.selectbox("🚫 Ne pas faire jouer (Joueur 1)", ["Aucune restriction"] + all_player_names, key="j1_select")
+        j1 = st.selectbox("🚫 Ne pas faire jouer (Joueur 1)", ["Aucune restriction"] + all_active_players, key="j1_select")
     with col_j2:
-        j2 = st.selectbox("...dans la même équipe que (Joueur 2)", ["Aucun"] + all_player_names, key="j2_select")
+        j2 = st.selectbox("...dans la même équipe que (Joueur 2)", ["Aucun"] + all_active_players, key="j2_select")
 
+    st.markdown("---")
     if st.button("⚽ Générer les Équipes Équilibrées", type="primary"):
-        selected_df = df_players[df_players["Nom du Joueur"].isin(selected_names)].copy()
-        nb_selected = len(selected_df)
-        
-        if len(same_team_players) > 5:
+        if total_count != 10:
+            st.error(f"Veuillez ajuster la sélection pour avoir exactement 10 joueurs (Actuellement: {total_count}).")
+        elif len(same_team_players) > 5:
             st.error("Impossible de forcer plus de 5 joueurs dans la même équipe !")
-        elif nb_selected < 10:
-            st.session_state.jokers_info = {
-                'nb_missing': 10 - nb_selected,
-                'selected_players': selected_df,
-                'j1': j1,
-                'j2': j2,
-                'same_team': same_team_players
-            }
-            st.session_state.show_jokers_modal = True
-            st.rerun()
-            
-        elif nb_selected > 10:
-            st.error("Veuillez sélectionner exactement 10 joueurs (ou moins si vous utilisez des jokers).")
         else:
+            selected_df = df_players[df_players["Nom du Joueur"].isin(selected_names)].copy()
             selected_df['is_joker'] = False
             players_list = selected_df.to_dict(orient='records')
             
+            for jk in st.session_state.jokers_list:
+                players_list.append(jk)
+                
             valid_combo, best_t1, best_t2 = compute_best_teams(players_list, j1, j2, same_team_players)
                     
             if valid_combo:
@@ -606,7 +596,7 @@ with tab1:
                 st.session_state.open_teams_popup = True
                 st.rerun()
             else:
-                st.error("Aucune combinaison valide trouvée respectant l'ensemble de vos restrictions.")
+                st.error("Aucune combinaison valide trouvée respectant l'ensemble de vos contraintes.")
 
 with tab2:
     st.subheader("🏃 Gestion de la Base de Données")
@@ -643,6 +633,10 @@ with tab2:
     st.markdown("---")
     
     st.markdown("**✏️ Modifier directement dans le tableau :**")
+    
+    # Recalcul de la note globale
+    st.session_state.players_df["Note Globale"] = st.session_state.players_df.apply(calculate_global_score, axis=1)
+    
     edited_df = st.data_editor(
         st.session_state.players_df,
         num_rows="dynamic",
@@ -651,6 +645,7 @@ with tab2:
             "Défense": st.column_config.SelectboxColumn("Défense", options=NUMERIC_OPTIONS, default=5),
             "Gardien": st.column_config.SelectboxColumn("Gardien (0 ou 1)", options=GK_OPTIONS, default=0),
             "Collectif": st.column_config.SelectboxColumn("Collectif", options=NUMERIC_OPTIONS, default=5),
+            "Note Globale": st.column_config.NumberColumn("Note Globale", format="%.1f", disabled=True),
         },
         key="data_editor"
     )
