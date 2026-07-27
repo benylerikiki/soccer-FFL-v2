@@ -115,6 +115,9 @@ st.markdown(
 if 'show_landing' not in st.session_state:
     st.session_state['show_landing'] = True
 
+if 'history' not in st.session_state:
+    st.session_state['history'] = []
+
 NUMERIC_OPTIONS = list(range(1, 11))
 GK_OPTIONS = [0, 1]
 
@@ -257,29 +260,24 @@ def create_player_card(card_path, player_name):
         
     stroke_w = max(2, int(font_size * 0.07))
     
-    # Si c'est un Joker (nom du type "Joker X") -> Écriture sur 2 lignes
     if player_name.upper().startswith("JOKER"):
         parts = player_name.upper().split(maxsplit=1)
-        line1 = parts[0]  # "JOKER"
-        line2 = parts[1] if len(parts) > 1 else ""  # Le prénom
+        line1 = parts[0]
+        line2 = parts[1] if len(parts) > 1 else ""
         
         y_center = int(h * (2 / 3))
         
-        # Ligne 1
         bbox1 = draw.textbbox((0, 0), line1, font=font)
         w1, h1 = bbox1[2] - bbox1[0], bbox1[3] - bbox1[1]
         x1 = (w - w1) / 2
         
-        # Ligne 2
         bbox2 = draw.textbbox((0, 0), line2, font=font)
         w2, h2 = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
         x2 = (w - w2) / 2
         
-        # Dessin des deux lignes
         draw.text((x1, y_center - h1 - 2), line1, fill="black", font=font, stroke_width=stroke_w, stroke_fill="white")
         draw.text((x2, y_center + 2), line2, fill="black", font=font, stroke_width=stroke_w, stroke_fill="white")
     else:
-        # Affichage classique 1 ligne
         y_pos = int(h * (2 / 3))
         text_bbox = draw.textbbox((0, 0), player_name.upper(), font=font)
         text_w = text_bbox[2] - text_bbox[0]
@@ -457,7 +455,7 @@ if st.session_state.get("open_teams_popup", False):
     st.session_state.open_teams_popup = False
     show_teams_popup(st.session_state.last_team1, st.session_state.last_team2)
 
-tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
+tab1, tab2, tab3 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base", "📜 Historique"])
 
 with tab1:
     with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=True):
@@ -620,6 +618,15 @@ with tab1:
             valid_combo, best_t1, best_t2 = compute_best_teams(players_list, j1, j2, same_team_players)
                     
             if valid_combo:
+                # Ajout à l'historique des 10 dernières équipes
+                st.session_state.history.insert(0, {
+                    't1': best_t1,
+                    't2': best_t2,
+                    'date': pd.Timestamp.now().strftime("%d/%m/%Y à %H:%M")
+                })
+                # Conservation stricte des 10 derniers
+                st.session_state.history = st.session_state.history[:10]
+
                 st.session_state.last_team1 = best_t1
                 st.session_state.last_team2 = best_t2
                 st.session_state.open_teams_popup = True
@@ -683,3 +690,39 @@ with tab2:
         st.session_state.players_df = load_data()
         st.success("Base de données enregistrée !")
         st.rerun()
+
+with tab3:
+    st.subheader("📜 Historique des 10 Dernières Compositions")
+    
+    if not st.session_state.history:
+        st.info("Aucune composition n'a encore été générée lors de cette session.")
+    else:
+        for idx, match_data in enumerate(st.session_state.history):
+            with st.expander(f"⚽ Composition {idx+1} — Générée le {match_data['date']}", expanded=(idx==0)):
+                h_t1 = match_data['t1']
+                h_t2 = match_data['t2']
+                
+                fig_hist = draw_combined_field(h_t1, h_t2)
+                st.pyplot(fig_hist, use_container_width=True)
+                
+                buf_h = io.BytesIO()
+                fig_hist.savefig(buf_h, format="png", bbox_inches='tight', dpi=250, facecolor='#226343')
+                buf_h.seek(0)
+                
+                st.download_button(
+                    label=f"📸 Télécharger le PNG (Match {idx+1})",
+                    data=buf_h,
+                    file_name=f"Compositions_FFL_{idx+1}.png",
+                    mime="image/png",
+                    key=f"dl_hist_{idx}"
+                )
+                
+                txt_wa = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n🔵 *ÉQUIPE 1* :\n"
+                for _, r in h_t1.iterrows():
+                    txt_wa += f"• {r['Nom du Joueur']}\n"
+                txt_wa += "\n🔴 *ÉQUIPE 2* :\n"
+                for _, r in h_t2.iterrows():
+                    txt_wa += f"• {r['Nom du Joueur']}\n"
+                
+                st.markdown("**📋 Texte WhatsApp :**")
+                st.code(txt_wa, language="text")
