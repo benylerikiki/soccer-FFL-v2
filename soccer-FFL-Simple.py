@@ -136,7 +136,6 @@ def text_to_gk_score(val):
     return 0
 
 def calculate_global_score(row):
-    """ Calcule la moyenne numérique des compétences terrain (Att, Def, Col) """
     att = text_to_score(row.get("Attaque", 5))
     defe = text_to_score(row.get("Défense", 5))
     col = text_to_score(row.get("Collectif", 5))
@@ -161,7 +160,6 @@ def load_data():
             if "Gardien" in df.columns:
                 df["Gardien"] = df["Gardien"].apply(text_to_gk_score)
                 
-            # Calcul de la note globale
             df["Note Globale"] = df.apply(calculate_global_score, axis=1)
             return df
         except Exception: 
@@ -437,64 +435,74 @@ if st.session_state.get("open_teams_popup", False):
 tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base"])
 
 with tab1:
-    with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=False):
-        convoc_text = st.text_area("Colle le texte brut de ta convocation ici :", height=150, placeholder="Présents : Nico P (1), Cyril V (2)...")
+    with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=True):
+        convoc_text = st.text_area("Colle le texte brut de ta convocation ici :", height=150, placeholder="Présents :\n1. Cyril V\n2. Nico P\n3. Benoit...")
         
         if st.button("🔍 Extraire et Valider les Joueurs"):
             if convoc_text.strip():
-                match = re.search(r"Présents\s*:\s*(.*)", convoc_text, re.IGNORECASE)
-                if match:
-                    raw_presents = match.group(1).split("\n")[0]
-                    cleaned_line = re.sub(r"\(\s*\d+\s*\)", "", raw_presents)
-                    raw_items = [item.strip() for item in re.split(r"[,;\n]+", cleaned_line) if item.strip()]
-                    
-                    df_db = st.session_state.players_df
-                    alias_map = {}
-                    for _, row in df_db.iterrows():
-                        real_name = row["Nom du Joueur"]
-                        alias_map.setdefault(real_name.lower(), []).append(real_name)
-                        surnoms = [s.strip().lower() for s in str(row["Surnoms"]).split(",") if s.strip()]
-                        for s in surnoms:
-                            if real_name not in alias_map.setdefault(s, []):
-                                alias_map[s].append(real_name)
-                    
-                    found_players = set()
-                    unknown_names = []
-                    ambiguous_matches = []
-                    
-                    for raw_item in raw_items:
-                        key = raw_item.lower()
-                        if key in alias_map:
-                            candidates = alias_map[key]
-                            if len(candidates) == 1:
-                                found_players.add(candidates[0])
-                            else:
-                                ambiguous_matches.append({"convoc_name": raw_item, "candidates": candidates})
+                # Recherche flexible du mot "Présent(s)"
+                match = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
+                target_text = match.group(1) if match else convoc_text
+
+                # Découpage ligne par ligne ou par virgule
+                raw_lines = re.split(r"[\n,;]+", target_text)
+                cleaned_items = []
+                
+                for line in raw_lines:
+                    # Nettoyage : retire la numérotation (ex: "1.", "2)", "(1)", "•", "-")
+                    clean = re.sub(r"^\s*[\d\.\-\*\•\(\)\:]+\s*", "", line.strip())
+                    clean = re.sub(r"\(\s*\d+\s*\)", "", clean).strip()
+                    if clean and not re.match(r"^absents?\b", clean, re.IGNORECASE):
+                        cleaned_items.append(clean)
+
+                df_db = st.session_state.players_df
+                alias_map = {}
+                for _, row in df_db.iterrows():
+                    real_name = row["Nom du Joueur"]
+                    alias_map.setdefault(real_name.lower(), []).append(real_name)
+                    surnoms = [s.strip().lower() for s in str(row["Surnoms"]).split(",") if s.strip()]
+                    for s in surnoms:
+                        if real_name not in alias_map.setdefault(s, []):
+                            alias_map[s].append(real_name)
+                
+                found_players = set()
+                unknown_names = []
+                ambiguous_matches = []
+                
+                for raw_item in cleaned_items:
+                    key = raw_item.lower()
+                    if key in alias_map:
+                        candidates = alias_map[key]
+                        if len(candidates) == 1:
+                            found_players.add(candidates[0])
                         else:
-                            sub_tokens = [t.strip() for t in raw_item.split() if t.strip()]
-                            matched_sub = False
-                            for token in sub_tokens:
-                                sub_key = token.lower()
-                                if sub_key in alias_map:
-                                    candidates = alias_map[sub_key]
-                                    if len(candidates) == 1:
-                                        found_players.add(candidates[0])
-                                        matched_sub = True
-                                    else:
-                                        ambiguous_matches.append({"convoc_name": token, "candidates": candidates})
-                                        matched_sub = True
-                            if not matched_sub:
-                                unknown_names.append(raw_item)
-                    
-                    st.session_state.auto_selected = found_players
-                    st.session_state.unknown_names = unknown_names
-                    st.session_state.ambiguous_matches = ambiguous_matches
-                    
-                    if not unknown_names and not ambiguous_matches:
-                        st.success(f"✅ {len(found_players)} joueurs reconnus et cochés sans ambiguïté !")
-                        st.rerun()
+                            ambiguous_matches.append({"convoc_name": raw_item, "candidates": candidates})
+                    else:
+                        # Essai de correspondance mot par mot si le nom complet n'est pas trouvé
+                        tokens = [t.strip() for t in raw_item.split() if len(t.strip()) > 1]
+                        matched = False
+                        for token in tokens:
+                            token_key = token.lower()
+                            if token_key in alias_map:
+                                candidates = alias_map[token_key]
+                                if len(candidates) == 1:
+                                    found_players.add(candidates[0])
+                                    matched = True
+                                else:
+                                    ambiguous_matches.append({"convoc_name": token, "candidates": candidates})
+                                    matched = True
+                        if not matched:
+                            unknown_names.append(raw_item)
+                
+                st.session_state.auto_selected = found_players
+                st.session_state.unknown_names = unknown_names
+                st.session_state.ambiguous_matches = ambiguous_matches
+                
+                if found_players:
+                    st.success(f"✅ {len(found_players)} joueur(s) reconnu(s) et coché(s) : {', '.join(found_players)}")
+                    st.rerun()
                 else:
-                    st.error("Impossible de trouver la section 'Présents :' dans le texte collé.")
+                    st.error("Aucun joueur de la base n'a été reconnu. Vérifiez l'orthographe ou ajoutez des surnoms dans l'onglet 'Gestion'.")
             else:
                 st.warning("Veuillez coller un texte de convocation.")
 
@@ -634,7 +642,6 @@ with tab2:
     
     st.markdown("**✏️ Modifier directement dans le tableau :**")
     
-    # Recalcul de la note globale
     st.session_state.players_df["Note Globale"] = st.session_state.players_df.apply(calculate_global_score, axis=1)
     
     edited_df = st.data_editor(
