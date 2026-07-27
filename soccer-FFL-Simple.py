@@ -249,22 +249,47 @@ def create_player_card(card_path, player_name):
     draw = ImageDraw.Draw(card_img)
     w, h = card_img.size
     
-    y_pos = int(h * (2 / 3))
-    font_size = max(24, int(w * 0.18))
+    font_size = max(20, int(w * 0.16))
     try:
         font = ImageFont.truetype(FONT_PATH, font_size)
     except Exception:
         font = ImageFont.load_default()
         
-    text_bbox = draw.textbbox((0, 0), player_name.upper(), font=font)
-    text_w = text_bbox[2] - text_bbox[0]
-    text_h = text_bbox[3] - text_bbox[1]
-    
-    x_pos = (w - text_w) / 2
-    y_pos_centered = y_pos - (text_h / 2)
-    
     stroke_w = max(2, int(font_size * 0.07))
-    draw.text((x_pos, y_pos_centered), player_name.upper(), fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
+    
+    # Si c'est un Joker (nom du type "Joker X") -> Écriture sur 2 lignes
+    if player_name.upper().startswith("JOKER"):
+        parts = player_name.upper().split(maxsplit=1)
+        line1 = parts[0]  # "JOKER"
+        line2 = parts[1] if len(parts) > 1 else ""  # Le prénom
+        
+        y_center = int(h * (2 / 3))
+        
+        # Ligne 1
+        bbox1 = draw.textbbox((0, 0), line1, font=font)
+        w1, h1 = bbox1[2] - bbox1[0], bbox1[3] - bbox1[1]
+        x1 = (w - w1) / 2
+        
+        # Ligne 2
+        bbox2 = draw.textbbox((0, 0), line2, font=font)
+        w2, h2 = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
+        x2 = (w - w2) / 2
+        
+        # Dessin des deux lignes
+        draw.text((x1, y_center - h1 - 2), line1, fill="black", font=font, stroke_width=stroke_w, stroke_fill="white")
+        draw.text((x2, y_center + 2), line2, fill="black", font=font, stroke_width=stroke_w, stroke_fill="white")
+    else:
+        # Affichage classique 1 ligne
+        y_pos = int(h * (2 / 3))
+        text_bbox = draw.textbbox((0, 0), player_name.upper(), font=font)
+        text_w = text_bbox[2] - text_bbox[0]
+        text_h = text_bbox[3] - text_bbox[1]
+        
+        x_pos = (w - text_w) / 2
+        y_pos_centered = y_pos - (text_h / 2)
+        
+        draw.text((x_pos, y_pos_centered), player_name.upper(), fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
+        
     return card_img
 
 def draw_combined_field(t1, t2):
@@ -440,16 +465,13 @@ with tab1:
         
         if st.button("🔍 Extraire et Valider les Joueurs"):
             if convoc_text.strip():
-                # Recherche flexible du mot "Présent(s)"
                 match = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
                 target_text = match.group(1) if match else convoc_text
 
-                # Découpage ligne par ligne ou par virgule
                 raw_lines = re.split(r"[\n,;]+", target_text)
                 cleaned_items = []
                 
                 for line in raw_lines:
-                    # Nettoyage : retire la numérotation (ex: "1.", "2)", "(1)", "•", "-")
                     clean = re.sub(r"^\s*[\d\.\-\*\•\(\)\:]+\s*", "", line.strip())
                     clean = re.sub(r"\(\s*\d+\s*\)", "", clean).strip()
                     if clean and not re.match(r"^absents?\b", clean, re.IGNORECASE):
@@ -478,7 +500,6 @@ with tab1:
                         else:
                             ambiguous_matches.append({"convoc_name": raw_item, "candidates": candidates})
                     else:
-                        # Essai de correspondance mot par mot si le nom complet n'est pas trouvé
                         tokens = [t.strip() for t in raw_item.split() if len(t.strip()) > 1]
                         matched = False
                         for token in tokens:
