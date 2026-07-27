@@ -357,6 +357,58 @@ def show_teams_popup(t1, t2):
     if st.button("Fermer"): 
         st.rerun()
 
+def compute_best_teams(players_list, j1, j2, same_team_players):
+    """ Calcule la meilleure composition d'équipes en tenant compte des filtres d'incompatibilité et de même équipe """
+    best_diff = float('inf')
+    best_gk_diff = float('inf')
+    best_team1, best_team2 = None, None
+    valid_combo_found = False
+    
+    for combo in itertools.combinations(players_list, 5):
+        t1 = list(combo)
+        t2 = [p for p in players_list if p not in t1]
+        
+        names_t1 = set(p['Nom du Joueur'] for p in t1)
+        names_t2 = set(p['Nom du Joueur'] for p in t2)
+        
+        # 1. Filtre Joueurs Forcés Ensemble
+        if same_team_players:
+            st_set = set(same_team_players)
+            # Les joueurs doivent être TOUS dans t1 OU TOUS dans t2
+            if not (st_set.issubset(names_t1) or st_set.issubset(names_t2)):
+                continue
+
+        # 2. Filtre Incompatibilité
+        if j1 != "Aucune restriction" and j2 != "Aucun":
+            if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
+                continue
+        
+        valid_combo_found = True
+        df_t1 = pd.DataFrame(t1)
+        df_t2 = pd.DataFrame(t2)
+        
+        t1_gk_sum = df_t1['Gardien'].apply(text_to_gk_score).sum()
+        t2_gk_sum = df_t2['Gardien'].apply(text_to_gk_score).sum()
+        gk_diff = abs(t1_gk_sum - t2_gk_sum)
+        
+        t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
+        t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
+        t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
+        
+        t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
+        t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
+        t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
+        
+        field_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_col_sum - t2_col_sum)
+        
+        if (gk_diff < best_gk_diff) or (gk_diff == best_gk_diff and field_diff < best_diff):
+            best_gk_diff = gk_diff
+            best_diff = field_diff
+            best_team1 = df_t1
+            best_team2 = df_t2
+
+    return valid_combo_found, best_team1, best_team2
+
 @st.dialog("🃏 Saisie des Joueurs Jokers", width="medium")
 def add_jokers_dialog():
     nb_missing = st.session_state.jokers_info['nb_missing']
@@ -365,6 +417,7 @@ def add_jokers_dialog():
     
     j1 = st.session_state.jokers_info['j1']
     j2 = st.session_state.jokers_info['j2']
+    same_team = st.session_state.jokers_info['same_team']
 
     st.write(f"Il manque **{nb_missing}** joueur(s) pour atteindre 10. Renseignez leurs prénoms et notes :")
     
@@ -398,51 +451,13 @@ def add_jokers_dialog():
             })
             
         full_group_df = pd.concat([selected_players_df, pd.DataFrame(jokers_rows)], ignore_index=True)
-        
         players_list = full_group_df.to_dict(orient='records')
-        best_diff = float('inf')
-        best_gk_diff = float('inf')
-        best_team1, best_team2 = None, None
-        valid_combo_found = False
         
-        for combo in itertools.combinations(players_list, 5):
-            t1 = list(combo)
-            t2 = [p for p in players_list if p not in t1]
-            
-            names_t1 = [p['Nom du Joueur'] for p in t1]
-            names_t2 = [p['Nom du Joueur'] for p in t2]
-            
-            if j1 != "Aucune restriction" and j2 != "Aucun":
-                if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
-                    continue
-            
-            valid_combo_found = True
-            df_t1 = pd.DataFrame(t1)
-            df_t2 = pd.DataFrame(t2)
-            
-            t1_gk_sum = df_t1['Gardien'].apply(text_to_gk_score).sum()
-            t2_gk_sum = df_t2['Gardien'].apply(text_to_gk_score).sum()
-            gk_diff = abs(t1_gk_sum - t2_gk_sum)
-            
-            t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
-            t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
-            t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
-            
-            t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
-            t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
-            t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
-            
-            field_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_col_sum - t2_col_sum)
-            
-            if (gk_diff < best_gk_diff) or (gk_diff == best_gk_diff and field_diff < best_diff):
-                best_gk_diff = gk_diff
-                best_diff = field_diff
-                best_team1 = df_t1
-                best_team2 = df_t2
+        valid_combo, best_t1, best_t2 = compute_best_teams(players_list, j1, j2, same_team)
                 
-        if valid_combo_found:
-            st.session_state.last_team1 = best_team1
-            st.session_state.last_team2 = best_team2
+        if valid_combo:
+            st.session_state.last_team1 = best_t1
+            st.session_state.last_team2 = best_t2
             st.session_state.open_teams_popup = True
             st.session_state.show_jokers_modal = False
             st.rerun()
@@ -543,25 +558,36 @@ with tab1:
     st.write(f"**Nombre de joueurs sélectionnés :** {len(selected_names)}")
     
     st.markdown("---")
-    st.subheader("Incompatibilités (Optionnel)")
-    col_j1, col_j2 = st.columns(2)
+    st.subheader("Restrictions & Affinités (Optionnel)")
     
+    # Sélecteur pour forcer des coéquipiers ensemble
+    all_selected_list = sorted(list(selected_names))
+    same_team_players = st.multiselect(
+        "🤝 Joueurs à Mettre IMPÉRATIVEMENT dans la MÊME ÉQUIPE :",
+        options=all_selected_list,
+        help="Sélectionne 2 joueurs ou plus qui doivent être placés dans la même équipe."
+    )
+    
+    col_j1, col_j2 = st.columns(2)
     all_player_names = df_players["Nom du Joueur"].tolist()
     with col_j1:
-        j1 = st.selectbox("Joueur 1", ["Aucune restriction"] + all_player_names, key="j1_select")
+        j1 = st.selectbox("🚫 Ne pas faire jouer (Joueur 1)", ["Aucune restriction"] + all_player_names, key="j1_select")
     with col_j2:
-        j2 = st.selectbox("Ne doit pas jouer avec Joueur 2", ["Aucun"] + all_player_names, key="j2_select")
+        j2 = st.selectbox("...dans la même équipe que (Joueur 2)", ["Aucun"] + all_player_names, key="j2_select")
 
     if st.button("⚽ Générer les Équipes Équilibrées", type="primary"):
         selected_df = df_players[df_players["Nom du Joueur"].isin(selected_names)].copy()
         nb_selected = len(selected_df)
         
-        if nb_selected < 10:
+        if len(same_team_players) > 5:
+            st.error("Impossible de forcer plus de 5 joueurs dans la même équipe !")
+        elif nb_selected < 10:
             st.session_state.jokers_info = {
                 'nb_missing': 10 - nb_selected,
                 'selected_players': selected_df,
                 'j1': j1,
-                'j2': j2
+                'j2': j2,
+                'same_team': same_team_players
             }
             st.session_state.show_jokers_modal = True
             st.rerun()
@@ -572,53 +598,15 @@ with tab1:
             selected_df['is_joker'] = False
             players_list = selected_df.to_dict(orient='records')
             
-            best_diff = float('inf')
-            best_gk_diff = float('inf')
-            best_team1, best_team2 = None, None
-            valid_combo_found = False
-            
-            for combo in itertools.combinations(players_list, 5):
-                t1 = list(combo)
-                t2 = [p for p in players_list if p not in t1]
-                
-                names_t1 = [p['Nom du Joueur'] for p in t1]
-                names_t2 = [p['Nom du Joueur'] for p in t2]
-                
-                if j1 != "Aucune restriction" and j2 != "Aucun":
-                    if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
-                        continue
-                
-                valid_combo_found = True
-                df_t1 = pd.DataFrame(t1)
-                df_t2 = pd.DataFrame(t2)
-                
-                t1_gk_sum = df_t1['Gardien'].apply(text_to_gk_score).sum()
-                t2_gk_sum = df_t2['Gardien'].apply(text_to_gk_score).sum()
-                gk_diff = abs(t1_gk_sum - t2_gk_sum)
-                
-                t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
-                t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
-                t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
-                
-                t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
-                t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
-                t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
-                
-                field_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_col_sum - t2_col_sum)
-                
-                if (gk_diff < best_gk_diff) or (gk_diff == best_gk_diff and field_diff < best_diff):
-                    best_gk_diff = gk_diff
-                    best_diff = field_diff
-                    best_team1 = df_t1
-                    best_team2 = df_t2
+            valid_combo, best_t1, best_t2 = compute_best_teams(players_list, j1, j2, same_team_players)
                     
-            if valid_combo_found:
-                st.session_state.last_team1 = best_team1
-                st.session_state.last_team2 = best_team2
+            if valid_combo:
+                st.session_state.last_team1 = best_t1
+                st.session_state.last_team2 = best_t2
                 st.session_state.open_teams_popup = True
                 st.rerun()
             else:
-                st.error("Aucune combinaison valide trouvée respectant les restrictions demandées.")
+                st.error("Aucune combinaison valide trouvée respectant l'ensemble de vos restrictions.")
 
 with tab2:
     st.subheader("🏃 Gestion de la Base de Données")
