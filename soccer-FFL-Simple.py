@@ -272,11 +272,20 @@ if 'jokers_db' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = load_history()
 
-if 'auto_selected' not in st.session_state:
-    st.session_state.auto_selected = set()
+# Ensemble des noms de joueurs sélectionnés pour le match
+if 'selected_players_set' not in st.session_state:
+    st.session_state.selected_players_set = set()
 
 if 'jokers_list' not in st.session_state:
     st.session_state.jokers_list = []
+
+# Synchronisation de l'état des Checkboxes
+def update_checkbox(player_name):
+    key = f"chk_{player_name}"
+    if st.session_state[key]:
+        st.session_state.selected_players_set.add(player_name)
+    else:
+        st.session_state.selected_players_set.discard(player_name)
 
 # ==========================================
 # 🖼️ PAGE DE GARDE
@@ -555,15 +564,11 @@ with tab1:
         
         if st.button("🔍 Extraire et Valider les Joueurs"):
             if convoc_text.strip():
-                # 1. Isolement de la section après "Présents"
                 match_presents = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
                 target_text = match_presents.group(1) if match_presents else convoc_text
 
-                # 2. Découpage du texte s'il contient des sections à ignorer (Jokers, à confirmer, Absents, Infirmerie)
                 stop_pattern = r"(jokers?|à\s*confirmer|a\s*confirmer|absents?|infirmerie)"
                 split_parts = re.split(stop_pattern, target_text, flags=re.IGNORECASE)
-                
-                # Seule la première partie (avant le premier terme d'exclusion) est conservée
                 valid_presents_text = split_parts[0]
 
                 raw_lines = re.split(r"[\n,;]+", valid_presents_text)
@@ -613,7 +618,11 @@ with tab1:
                         if not matched:
                             unknown_names.append(raw_item)
                 
-                st.session_state.auto_selected = found_players
+                # Mise à jour de l'ensemble source de vérité et réinitialisation des clefs individuelles
+                st.session_state.selected_players_set = found_players
+                for p in df_db["Nom du Joueur"]:
+                    st.session_state[f"chk_{p}"] = (p in found_players)
+
                 st.session_state.unknown_names = unknown_names
                 st.session_state.ambiguous_matches = ambiguous_matches
                 
@@ -632,15 +641,23 @@ with tab1:
 
     st.subheader("1. Sélection des Joueurs Présents")
     df_players = st.session_state.players_df
-    selected_names = set()
     
     cols = st.columns(3)
     for idx, row in df_players.iterrows():
         p_name = row["Nom du Joueur"]
-        is_default = p_name in st.session_state.auto_selected
+        key_chk = f"chk_{p_name}"
+        
+        # Initialisation si nécessaire
+        if key_chk not in st.session_state:
+            st.session_state[key_chk] = p_name in st.session_state.selected_players_set
+            
         with cols[idx % 3]:
-            if st.checkbox(p_name, value=is_default, key=f"chk_{p_name}"):
-                selected_names.add(p_name)
+            st.checkbox(
+                p_name, 
+                key=key_chk, 
+                on_change=update_checkbox, 
+                args=(p_name,)
+            )
 
     st.markdown("---")
     st.subheader("2. Joueurs Jokers / Invités (Optionnel)")
@@ -672,7 +689,7 @@ with tab1:
                 with col_info2:
                     st.info(f"⭐ **Note Globale :** {score_val} / 10")
                 
-                if host_player and host_player not in selected_names:
+                if host_player and host_player not in st.session_state.selected_players_set:
                     st.warning(f"⚠️ **Avertissement :** Le joueur rattaché (**{host_player}**) n'est pas coché dans la liste des présents ci-dessus.")
                 
                 if st.button("➕ Valider et Ajouter ce Joker", type="primary", key="btn_add_exist_jk"):
@@ -746,7 +763,7 @@ with tab1:
                     st.session_state.jokers_list.pop(jk_idx)
                     st.rerun()
 
-    all_active_players = list(selected_names) + [j["Nom du Joueur"] for j in st.session_state.jokers_list]
+    all_active_players = list(st.session_state.selected_players_set) + [j["Nom du Joueur"] for j in st.session_state.jokers_list]
     total_count = len(all_active_players)
     st.markdown(f"**Nombre total de joueurs retenus pour le match :** `{total_count} / 10`")
 
@@ -772,7 +789,7 @@ with tab1:
         elif len(same_team_players) > 5:
             st.error("Impossible de forcer plus de 5 joueurs dans la même équipe !")
         else:
-            selected_df = df_players[df_players["Nom du Joueur"].isin(selected_names)].copy()
+            selected_df = df_players[df_players["Nom du Joueur"].isin(st.session_state.selected_players_set)].copy()
             selected_df['is_joker'] = False
             players_list = selected_df.to_dict(orient='records')
             
