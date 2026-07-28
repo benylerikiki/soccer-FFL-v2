@@ -272,14 +272,12 @@ if 'jokers_db' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = load_history()
 
-# Ensemble des noms de joueurs sélectionnés pour le match
 if 'selected_players_set' not in st.session_state:
     st.session_state.selected_players_set = set()
 
 if 'jokers_list' not in st.session_state:
     st.session_state.jokers_list = []
 
-# Synchronisation de l'état des Checkboxes
 def update_checkbox(player_name):
     key = f"chk_{player_name}"
     if st.session_state[key]:
@@ -319,7 +317,7 @@ if st.session_state.get('show_landing', True):
     st.stop()
 
 # ==========================================
-# ⚽ FONCTIONS DU TERRAIN & DIALOGS
+# ⚽ FONCTIONS DU TERRAIN & DESSIN
 # ==========================================
 
 def create_player_card(card_path, player_name):
@@ -368,7 +366,7 @@ def create_player_card(card_path, player_name):
         
     return card_img
 
-def draw_combined_field(t1, t2):
+def draw_combined_field(t1, t2, max_players=10):
     fig, ax = plt.subplots(figsize=(10, 6.5))
     fig.patch.set_facecolor('#226343')
     ax.set_facecolor('#226343')
@@ -387,47 +385,44 @@ def draw_combined_field(t1, t2):
     card_width = 13.5
     card_height = 18.0
     
-    # Équipe 1
     pos1 = [(7, 30), (23, 13), (23, 47), (40, 17), (40, 43)]
+    pos2 = [(93, 30), (77, 13), (77, 47), (60, 17), (60, 43)]
+
     players1 = t1.copy()
     players1['Gk_Num'] = players1['Gardien'].apply(text_to_gk_score)
     players1 = players1.sort_values(by="Gk_Num", ascending=False).reset_index(drop=True)
-    
-    for i, row in players1.iterrows():
-        if i >= len(pos1): break
-        x, y = pos1[i]
-        p_name = str(row['Nom du Joueur'])
-        is_joker = bool(row.get('is_joker', False))
-        
-        card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else BLUE_CARD_PATH
-        card_img = create_player_card(card_file, p_name)
-        
-        if card_img:
-            ax.imshow(card_img, extent=[x - card_width/2, x + card_width/2, y - card_height/2, y + card_height/2], zorder=3)
-        else:
-            circle_color = "#FFD700" if is_joker else "#1C6CF6"
-            ax.scatter(x, y, color=circle_color, s=350, edgecolors='white', linewidths=2.0, zorder=3)
-            ax.text(x, y - 5.5, p_name, color='black' if is_joker else 'white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
-        
-    # Équipe 2
-    pos2 = [(93, 30), (77, 13), (77, 47), (60, 17), (60, 43)]
+
     players2 = t2.copy()
     players2['Gk_Num'] = players2['Gardien'].apply(text_to_gk_score)
     players2 = players2.sort_values(by="Gk_Num", ascending=False).reset_index(drop=True)
-    
-    for i, row in players2.iterrows():
-        if i >= len(pos2): break
-        x, y = pos2[i]
+
+    # Définition de l'ordre d'affichage (alternance Équipe 1 / Équipe 2)
+    draw_sequence = []
+    for step_idx in range(5):
+        if step_idx < len(players1):
+            draw_sequence.append(('t1', step_idx))
+        if step_idx < len(players2):
+            draw_sequence.append(('t2', step_idx))
+
+    # Affichage des cartes jusqu'à max_players
+    for item_idx, (team, p_idx) in enumerate(draw_sequence[:max_players]):
+        if team == 't1':
+            x, y = pos1[p_idx]
+            row = players1.iloc[p_idx]
+            card_file = YELLOW_CARD_PATH if (bool(row.get('is_joker', False)) and os.path.exists(YELLOW_CARD_PATH)) else BLUE_CARD_PATH
+        else:
+            x, y = pos2[p_idx]
+            row = players2.iloc[p_idx]
+            card_file = YELLOW_CARD_PATH if (bool(row.get('is_joker', False)) and os.path.exists(YELLOW_CARD_PATH)) else RED_CARD_PATH
+
         p_name = str(row['Nom du Joueur'])
         is_joker = bool(row.get('is_joker', False))
-        
-        card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else RED_CARD_PATH
         card_img = create_player_card(card_file, p_name)
         
         if card_img:
             ax.imshow(card_img, extent=[x - card_width/2, x + card_width/2, y - card_height/2, y + card_height/2], zorder=3)
         else:
-            circle_color = "#FFD700" if is_joker else "#E03131"
+            circle_color = "#FFD700" if is_joker else ("#1C6CF6" if team == 't1' else "#E03131")
             ax.scatter(x, y, color=circle_color, s=350, edgecolors='white', linewidths=2.0, zorder=3)
             ax.text(x, y - 5.5, p_name, color='black' if is_joker else 'white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
     
@@ -439,6 +434,34 @@ def draw_combined_field(t1, t2):
     ax.axis('off')
     plt.tight_layout()
     return fig
+
+# --- GÉNÉRATEUR DE GIF ANIMÉ ---
+def create_animated_gif(t1, t2):
+    frames = []
+    
+    for step in range(1, 11):
+        fig = draw_combined_field(t1, t2, max_players=step)
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", bbox_inches='tight', dpi=130, facecolor='#226343')
+        buf.seek(0)
+        img = Image.open(buf).convert("RGB")
+        frames.append(img)
+        plt.close(fig)
+        
+    gif_buf = io.BytesIO()
+    # 600ms par carte, puis 3000ms sur la fin
+    durations = [600] * 9 + [3000]
+    
+    frames[0].save(
+        gif_buf,
+        format='GIF',
+        save_all=True,
+        append_images=frames[1:],
+        duration=durations,
+        loop=0
+    )
+    gif_buf.seek(0)
+    return gif_buf
 
 def render_teams_summary(t1, t2):
     att1, att2 = t1['Attaque'].apply(text_to_score).sum(), t2['Attaque'].apply(text_to_score).sum()
@@ -462,15 +485,37 @@ def render_teams_summary(t1, t2):
 
 @st.dialog("Compositions du Match", width="large")
 def show_teams_popup(t1, t2):
-    st.write("Match équilibré généré avec succès ! 📸")
-    fig_combined = draw_combined_field(t1, t2)
-    st.pyplot(fig_combined, use_container_width=True)
+    st.write("Match équilibré généré avec succès ! 🎬")
     
-    buf = io.BytesIO()
-    fig_combined.savefig(buf, format="png", bbox_inches='tight', dpi=250, facecolor='#226343')
-    buf.seek(0)
+    # Génération et affichage du GIF animé
+    gif_buf = create_animated_gif(t1, t2)
+    st.image(gif_buf, use_container_width=True)
     
-    st.download_button(label="📸 Télécharger l'image (PNG)", data=buf, file_name="Compositions_FFL.png", mime="image/png", type="primary")
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            label="🎬 Télécharger l'Animation (GIF)", 
+            data=gif_buf, 
+            file_name="Compositions_FFL_Animee.gif", 
+            mime="image/gif", 
+            type="primary"
+        )
+        
+    with col_dl2:
+        # Téléchargement PNG fixe
+        fig_combined = draw_combined_field(t1, t2, max_players=10)
+        buf_png = io.BytesIO()
+        fig_combined.savefig(buf_png, format="png", bbox_inches='tight', dpi=200, facecolor='#226343')
+        buf_png.seek(0)
+        plt.close(fig_combined)
+        
+        st.download_button(
+            label="📸 Télécharger l'Image Fixe (PNG)", 
+            data=buf_png, 
+            file_name="Compositions_FFL.png", 
+            mime="image/png"
+        )
+
     st.write("---")
     
     text_whatsapp = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n"
@@ -618,7 +663,6 @@ with tab1:
                         if not matched:
                             unknown_names.append(raw_item)
                 
-                # Mise à jour de l'ensemble source de vérité et réinitialisation des clefs individuelles
                 st.session_state.selected_players_set = found_players
                 for p in df_db["Nom du Joueur"]:
                     st.session_state[f"chk_{p}"] = (p in found_players)
@@ -647,7 +691,6 @@ with tab1:
         p_name = row["Nom du Joueur"]
         key_chk = f"chk_{p_name}"
         
-        # Initialisation si nécessaire
         if key_chk not in st.session_state:
             st.session_state[key_chk] = p_name in st.session_state.selected_players_set
             
@@ -1040,20 +1083,33 @@ with tab3:
                 h_t1 = match_data['t1']
                 h_t2 = match_data['t2']
                 
-                fig_hist = draw_combined_field(h_t1, h_t2)
-                st.pyplot(fig_hist, use_container_width=True)
+                # Rendu animé du GIF
+                gif_hist = create_animated_gif(h_t1, h_t2)
+                st.image(gif_hist, use_container_width=True)
                 
-                buf_h = io.BytesIO()
-                fig_hist.savefig(buf_h, format="png", bbox_inches='tight', dpi=250, facecolor='#226343')
-                buf_h.seek(0)
-                
-                st.download_button(
-                    label=f"📸 Télécharger le PNG (Match {idx+1})",
-                    data=buf_h,
-                    file_name=f"Compositions_FFL_{idx+1}.png",
-                    mime="image/png",
-                    key=f"dl_hist_{idx}"
-                )
+                col_h_dl1, col_h_dl2 = st.columns(2)
+                with col_h_dl1:
+                    st.download_button(
+                        label=f"🎬 Télécharger GIF (Match {idx+1})",
+                        data=gif_hist,
+                        file_name=f"Compositions_FFL_{idx+1}.gif",
+                        mime="image/gif",
+                        key=f"dl_gif_hist_{idx}"
+                    )
+                with col_h_dl2:
+                    fig_hist = draw_combined_field(h_t1, h_t2, max_players=10)
+                    buf_h = io.BytesIO()
+                    fig_hist.savefig(buf_h, format="png", bbox_inches='tight', dpi=200, facecolor='#226343')
+                    buf_h.seek(0)
+                    plt.close(fig_hist)
+                    
+                    st.download_button(
+                        label=f"📸 Télécharger PNG (Match {idx+1})",
+                        data=buf_h,
+                        file_name=f"Compositions_FFL_{idx+1}.png",
+                        mime="image/png",
+                        key=f"dl_png_hist_{idx}"
+                    )
                 
                 txt_wa = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n🔵 *ÉQUIPE 1* :\n"
                 for _, r in h_t1.iterrows():
