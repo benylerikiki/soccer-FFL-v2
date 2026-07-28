@@ -555,16 +555,24 @@ with tab1:
         
         if st.button("🔍 Extraire et Valider les Joueurs"):
             if convoc_text.strip():
-                match = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
-                target_text = match.group(1) if match else convoc_text
+                # 1. Isolement de la section après "Présents"
+                match_presents = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
+                target_text = match_presents.group(1) if match_presents else convoc_text
 
-                raw_lines = re.split(r"[\n,;]+", target_text)
+                # 2. Découpage du texte s'il contient des sections à ignorer (Jokers, à confirmer, Absents, Infirmerie)
+                stop_pattern = r"(jokers?|à\s*confirmer|a\s*confirmer|absents?|infirmerie)"
+                split_parts = re.split(stop_pattern, target_text, flags=re.IGNORECASE)
+                
+                # Seule la première partie (avant le premier terme d'exclusion) est conservée
+                valid_presents_text = split_parts[0]
+
+                raw_lines = re.split(r"[\n,;]+", valid_presents_text)
                 cleaned_items = []
                 
                 for line in raw_lines:
                     clean = re.sub(r"^\s*[\d\.\-\*\•\(\)\:]+\s*", "", line.strip())
                     clean = re.sub(r"\(\s*\d+\s*\)", "", clean).strip()
-                    if clean and not re.match(r"^absents?\b", clean, re.IGNORECASE):
+                    if clean:
                         cleaned_items.append(clean)
 
                 df_db = st.session_state.players_df
@@ -613,7 +621,7 @@ with tab1:
                     st.success(f"✅ {len(found_players)} joueur(s) reconnu(s) et coché(s) : {', '.join(found_players)}")
                     st.rerun()
                 else:
-                    st.error("Aucun joueur de la base n'a été reconnu.")
+                    st.error("Aucun joueur de la base n'a été reconnu dans la liste des présents.")
             else:
                 st.warning("Veuillez coller un texte de convocation.")
 
@@ -947,7 +955,6 @@ with tab2:
 
         st.markdown("---")
 
-        # --- IMPORT / EXPORT EXCEL DÉDIÉ AUX JOKERS ---
         col_exp_j, col_imp_j = st.columns(2)
         
         with col_exp_j:
