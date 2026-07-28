@@ -639,14 +639,55 @@ with tab1:
     
     with st.expander("➕ Ajouter / Sélectionner un Joker", expanded=False):
         jokers_db = st.session_state.jokers_db
-        existing_jokers = jokers_db["Nom Joker"].dropna().unique().tolist() if not jokers_db.empty else []
-        
-        choice_joker_type = st.radio("Type de Joker :", ["Saisir un Nouveau Joker", "Sélectionner un Joker existant dans la base"], horizontal=True)
-        
+        choice_joker_type = st.radio("Type de Joker :", ["Saisir un Nouveau Joker", "Sélectionner un Joker existant dans la base"], horizontal=True, key="radio_jk_type")
         all_regular_players = df_players["Nom du Joueur"].tolist()
         
-        with st.form("form_add_joker"):
-            if choice_joker_type == "Saisir un Nouveau Joker":
+        if choice_joker_type == "Sélectionner un Joker existant dans la base":
+            if jokers_db.empty:
+                st.info("Aucun Joker n'est actuellement enregistré dans la base.")
+            else:
+                # Dictionnaire pour formater la sélection "Nom (Rattaché à X)"
+                joker_options = {}
+                for idx, r_jk in jokers_db.iterrows():
+                    host_str = str(r_jk['Joueur Rattaché']) if pd.notna(r_jk['Joueur Rattaché']) else "Aucun"
+                    j_label = f"{r_jk['Nom Joker']} (Rattaché à {host_str})"
+                    joker_options[j_label] = r_jk
+                
+                selected_j_label = st.selectbox("Choisir le Joker :", options=list(joker_options.keys()), key="sel_exist_jk")
+                selected_jk_row = joker_options[selected_j_label]
+                
+                host_player = str(selected_jk_row.get("Joueur Rattaché", ""))
+                score_val = text_to_score(selected_jk_row.get("Note Globale", 5))
+                
+                # Affichage des informations
+                col_info1, col_info2 = st.columns(2)
+                with col_info1:
+                    st.info(f"👤 **Joueur rattaché :** {host_player if host_player else 'Aucun'}")
+                with col_info2:
+                    st.info(f"⭐ **Note Globale :** {score_val} / 10")
+                
+                # Avertissement non bloquant si l'hôte n'est pas coché
+                if host_player and host_player not in selected_names:
+                    st.warning(f"⚠️ **Avertissement :** Le joueur rattaché (**{host_player}**) n'est pas coché dans la liste des présents ci-dessus.")
+                
+                if st.button("➕ Valider et Ajouter ce Joker", type="primary", key="btn_add_exist_jk"):
+                    jk_name_str = str(selected_jk_row['Nom Joker']).strip()
+                    final_jk_name = f"Joker {jk_name_str}" if not jk_name_str.startswith("Joker") else jk_name_str
+                    
+                    st.session_state.jokers_list.append({
+                        "Nom du Joueur": final_jk_name,
+                        "Attaque": score_val,
+                        "Défense": score_val,
+                        "Gardien": 1,
+                        "Collectif": score_val,
+                        "Surnoms": "",
+                        "is_joker": True
+                    })
+                    st.success(f"Joker '{final_jk_name}' ajouté !")
+                    st.rerun()
+
+        else:
+            with st.form("form_add_new_joker"):
                 col_jk1, col_jk2, col_jk3 = st.columns([2, 2, 1])
                 with col_jk1:
                     jk_name = st.text_input("Prénom / Nom du Joker", value="Joker")
@@ -654,30 +695,18 @@ with tab1:
                     jk_host = st.selectbox("Joueur Rattaché (Hôte)", options=all_regular_players)
                 with col_jk3:
                     jk_score = st.number_input("Note Globale (1-10)", min_value=1, max_value=10, value=5)
-            else:
-                col_jk1, col_jk2 = st.columns([2, 2])
-                with col_jk1:
-                    selected_existing_jk = st.selectbox("Choisir le Joker :", options=existing_jokers if existing_jokers else ["Aucun Joker disponible"])
-                with col_jk2:
-                    jk_host = st.selectbox("Joueur Rattaché (Hôte)", options=all_regular_players)
-                jk_name = selected_existing_jk
-                jk_score = 5
-            
-            btn_add_joker = st.form_submit_button("➕ Valider ce Joker")
-            
-            if btn_add_joker:
-                if choice_joker_type == "Sélectionner un Joker existant dans la base" and not existing_jokers:
-                    st.error("Aucun joker disponible dans la base.")
-                else:
-                    if choice_joker_type == "Sélectionner un Joker existant dans la base":
-                        row_jk = jokers_db[jokers_db["Nom Joker"] == selected_existing_jk].iloc[0]
-                        final_jk_name = f"Joker {row_jk['Nom Joker']}" if not str(row_jk['Nom Joker']).startswith("Joker") else str(row_jk['Nom Joker'])
-                        score_val = text_to_score(row_jk['Note Globale'])
+                
+                btn_add_new_joker = st.form_submit_button("➕ Valider et Créer ce Joker", type="primary")
+                
+                if btn_add_new_joker:
+                    clean_name = jk_name.strip()
+                    if not clean_name:
+                        st.error("Veuillez saisir un nom pour le joker.")
                     else:
-                        clean_name = jk_name.strip()
                         final_jk_name = f"Joker {clean_name}" if not clean_name.startswith("Joker") else clean_name
                         score_val = text_to_score(jk_score)
                         
+                        # Enregistrement dans la base des Jokers
                         new_joker_entry = pd.DataFrame([{
                             "Nom Joker": clean_name,
                             "Joueur Rattaché": jk_host,
@@ -690,17 +719,17 @@ with tab1:
                         st.session_state.jokers_db = pd.concat([st.session_state.jokers_db, new_joker_entry], ignore_index=True)
                         save_jokers_db(st.session_state.jokers_db)
 
-                    st.session_state.jokers_list.append({
-                        "Nom du Joueur": final_jk_name,
-                        "Attaque": score_val,
-                        "Défense": score_val,
-                        "Gardien": 1,
-                        "Collectif": score_val,
-                        "Surnoms": "",
-                        "is_joker": True
-                    })
-                    st.success(f"Joker '{final_jk_name}' ajouté et rattaché à {jk_host} !")
-                    st.rerun()
+                        st.session_state.jokers_list.append({
+                            "Nom du Joueur": final_jk_name,
+                            "Attaque": score_val,
+                            "Défense": score_val,
+                            "Gardien": 1,
+                            "Collectif": score_val,
+                            "Surnoms": "",
+                            "is_joker": True
+                        })
+                        st.success(f"Joker '{final_jk_name}' créé et sauvegardé dans la base !")
+                        st.rerun()
 
     if st.session_state.jokers_list:
         st.markdown("**Jokers configurés pour ce match :**")
@@ -770,7 +799,7 @@ with tab2:
     tab_db1, tab_db2 = st.tabs(["📋 Base Principale Joueurs", "🃏 Base Dédiée Jokers"])
     
     with tab_db1:
-        # --- BOUTONS AJOUTER / SUPPRIMER UN JOUEUR ---
+        # BOUTONS AJOUTER / SUPPRIMER UN JOUEUR
         col_add_p, col_del_p = st.columns(2)
         
         with col_add_p:
@@ -875,7 +904,7 @@ with tab2:
             st.rerun()
 
     with tab_db2:
-        # --- BOUTONS AJOUTER / SUPPRIMER UN JOKER EN BASE ---
+        # BOUTONS AJOUTER / SUPPRIMER UN JOKER EN BASE
         col_add_j, col_del_j = st.columns(2)
         
         with col_add_j:
