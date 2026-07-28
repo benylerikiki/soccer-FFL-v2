@@ -206,7 +206,7 @@ def load_jokers_db():
     if os.path.exists(JOKERS_FILE):
         try:
             df = pd.read_excel(JOKERS_FILE)
-            for col in ["Attaque", "Défense", "Collectif"]:
+            for col in ["Attaque", "Défense", "Collectif", "Note Globale"]:
                 if col in df.columns:
                     df[col] = df[col].apply(text_to_score)
             if "Gardien" not in df.columns:
@@ -646,7 +646,6 @@ with tab1:
             if jokers_db.empty:
                 st.info("Aucun Joker n'est actuellement enregistré dans la base.")
             else:
-                # Dictionnaire pour formater la sélection "Nom (Rattaché à X)"
                 joker_options = {}
                 for idx, r_jk in jokers_db.iterrows():
                     host_str = str(r_jk['Joueur Rattaché']) if pd.notna(r_jk['Joueur Rattaché']) else "Aucun"
@@ -659,14 +658,12 @@ with tab1:
                 host_player = str(selected_jk_row.get("Joueur Rattaché", ""))
                 score_val = text_to_score(selected_jk_row.get("Note Globale", 5))
                 
-                # Affichage des informations
                 col_info1, col_info2 = st.columns(2)
                 with col_info1:
                     st.info(f"👤 **Joueur rattaché :** {host_player if host_player else 'Aucun'}")
                 with col_info2:
                     st.info(f"⭐ **Note Globale :** {score_val} / 10")
                 
-                # Avertissement non bloquant si l'hôte n'est pas coché
                 if host_player and host_player not in selected_names:
                     st.warning(f"⚠️ **Avertissement :** Le joueur rattaché (**{host_player}**) n'est pas coché dans la liste des présents ci-dessus.")
                 
@@ -706,7 +703,6 @@ with tab1:
                         final_jk_name = f"Joker {clean_name}" if not clean_name.startswith("Joker") else clean_name
                         score_val = text_to_score(jk_score)
                         
-                        # Enregistrement dans la base des Jokers
                         new_joker_entry = pd.DataFrame([{
                             "Nom Joker": clean_name,
                             "Joueur Rattaché": jk_host,
@@ -799,7 +795,6 @@ with tab2:
     tab_db1, tab_db2 = st.tabs(["📋 Base Principale Joueurs", "🃏 Base Dédiée Jokers"])
     
     with tab_db1:
-        # BOUTONS AJOUTER / SUPPRIMER UN JOUEUR
         col_add_p, col_del_p = st.columns(2)
         
         with col_add_p:
@@ -904,7 +899,6 @@ with tab2:
             st.rerun()
 
     with tab_db2:
-        # BOUTONS AJOUTER / SUPPRIMER UN JOKER EN BASE
         col_add_j, col_del_j = st.columns(2)
         
         with col_add_j:
@@ -950,6 +944,38 @@ with tab2:
                         st.rerun()
                 else:
                     st.info("Aucun joker dans la base.")
+
+        st.markdown("---")
+
+        # --- IMPORT / EXPORT EXCEL DÉDIÉ AUX JOKERS ---
+        col_exp_j, col_imp_j = st.columns(2)
+        
+        with col_exp_j:
+            st.markdown("**📥 Exporter la base Jokers**")
+            output_buffer_j = io.BytesIO()
+            with pd.ExcelWriter(output_buffer_j, engine='openpyxl') as writer:
+                st.session_state.jokers_db.to_excel(writer, index=False)
+            output_buffer_j.seek(0)
+            
+            st.download_button(
+                label="⬇️ Télécharger la base Jokers (.xlsx)",
+                data=output_buffer_j,
+                file_name="database_jokers.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        with col_imp_j:
+            st.markdown("**📤 Importer un fichier Excel Jokers**")
+            uploaded_j_file = st.file_uploader("Charger un fichier database_jokers.xlsx", type=["xlsx"], key="up_jokers")
+            if uploaded_j_file is not None:
+                try:
+                    new_j_df = pd.read_excel(uploaded_j_file)
+                    save_jokers_db(new_j_df)
+                    st.session_state.jokers_db = load_jokers_db()
+                    st.success("✅ Base de données Jokers mise à jour avec succès !")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur lors de la lecture du fichier : {e}")
 
         st.markdown("---")
         st.markdown("**📋 Base de données enregistrée des Jokers :**")
