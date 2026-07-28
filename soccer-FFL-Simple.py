@@ -309,7 +309,6 @@ if st.session_state.get('show_landing', True):
             st.session_state['show_landing'] = False
             st.rerun()
 
-        st.markdown("<p style='text-align: center; color: #888; margin-top: 15px;'>👆 Cliquez sur l'image pour accéder aux compositions</p>", unsafe_allow_html=True)
     else:
         st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`).")
         if st.button("🚀 ENTRER DANS L'APPLICATION", type="primary"):
