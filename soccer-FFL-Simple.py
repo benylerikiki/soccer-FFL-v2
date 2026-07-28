@@ -79,12 +79,12 @@ st.markdown(
     }
 
     .landing-wrapper {
-        position: relative;
         width: 100%;
         max-width: 900px;
         margin: 0 auto;
         display: flex;
-        justify-content: center;
+        flex-direction: column;
+        align-items: center;
     }
     .landing-img {
         width: 100%;
@@ -92,22 +92,7 @@ st.markdown(
         object-fit: contain;
         border-radius: 16px;
         box-shadow: 0 6px 25px rgba(0,0,0,0.6);
-    }
-    div[data-testid="stElementContainer"]:has(button[key="overlay_enter_btn"]) {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-        z-index: 10 !important;
-    }
-    button[key="overlay_enter_btn"] {
-        width: 100% !important;
-        height: 100% !important;
-        background: transparent !important;
-        border: none !important;
-        color: transparent !important;
-        cursor: pointer !important;
+        margin-bottom: 15px;
     }
     </style>
     """,
@@ -296,18 +281,19 @@ if st.session_state.get('show_landing', True):
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
+        st.markdown('<div class="landing-wrapper">', unsafe_allow_html=True)
         st.markdown(
             f"""
-            <div class="landing-wrapper">
-                <img class="landing-img" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
-            </div>
+            <img class="landing-img" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
             """, 
             unsafe_allow_html=True
         )
         
-        if st.button("Entrer dans l'application", key="overlay_enter_btn"):
+        if st.button("🚀 ENTRER DANS L'APPLICATION", type="primary", use_container_width=True):
             st.session_state['show_landing'] = False
             st.rerun()
+            
+        st.markdown('</div>', unsafe_allow_html=True)
 
     else:
         st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`).")
