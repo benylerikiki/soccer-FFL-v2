@@ -185,7 +185,7 @@ def save_data(df):
     other_cols = [c for c in clean_df.columns if c not in ordered_cols]
     clean_df[existing_cols + other_cols].to_excel(DATA_FILE, index=False)
 
-# --- GESTION DE LA BASE JOKERS SÉCURISÉE ---
+# --- GESTION DE LA BASE JOKERS ---
 def load_jokers():
     if os.path.exists(JOKERS_FILE):
         try:
@@ -201,7 +201,6 @@ def load_jokers():
         except Exception:
             pass
 
-    # Valeurs par défaut avec structure garantie
     default_jokers = pd.DataFrame({
         "Nom du Joueur": ["Joker 1", "Joker 2"],
         "Attaque": [5, 6],
@@ -232,7 +231,6 @@ def save_jokers(df):
     other_cols = [c for c in clean_df.columns if c not in ordered_cols]
     clean_df[existing_cols + other_cols].to_excel(JOKERS_FILE, index=False)
 
-# Chargement synchrone à chaque run
 st.session_state.players_df = load_data()
 st.session_state.jokers_df = load_jokers()
 
@@ -294,7 +292,8 @@ def draw_combined_field(t1, t2):
     ax.set_facecolor('#226343')
     ax.plot([0, 100, 100, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
     ax.plot([50, 50], [0, 60], color='white', linewidth=2.0)
-    ax.add_patch(patches.Circle((50, 30), 9, edgecolor='white', facecolor='none', linewidth=1.5))
+    center_circle = patches.Circle((50, 30), 9, edgecolor='white', facecolor='none', linewidth=1.5)
+    ax.add_patch(center_circle)
     ax.scatter(50, 30, color='white', s=15, zorder=2)
     ax.add_patch(patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5))
     ax.scatter(9, 30, color='white', s=15, zorder=2)
@@ -376,8 +375,11 @@ def add_jokers_dialog():
     nb_missing = st.session_state.jokers_info['nb_missing']
     selected_players_df = st.session_state.jokers_info['selected_players'].copy()
     selected_players_df['is_joker'] = False
-    j1 = st.session_state.jokers_info['j1']
-    j2 = st.session_state.jokers_info['j2']
+    
+    sep_j1 = st.session_state.jokers_info['sep_j1']
+    sep_j2 = st.session_state.jokers_info['sep_j2']
+    pair_j1 = st.session_state.jokers_info['pair_j1']
+    pair_j2 = st.session_state.jokers_info['pair_j2']
 
     st.write(f"Il manque **{nb_missing}** joueur(s) pour atteindre 10.")
     
@@ -430,8 +432,14 @@ def add_jokers_dialog():
             names_t1 = [p['Nom du Joueur'] for p in t1]
             names_t2 = [p['Nom du Joueur'] for p in t2]
             
-            if j1 != "Aucune restriction" and j2 != "Aucun":
-                if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
+            # Contrainte 1 : Ne pas jouer ensemble (séparer)
+            if sep_j1 != "Aucune restriction" and sep_j2 != "Aucun":
+                if (sep_j1 in names_t1 and sep_j2 in names_t1) or (sep_j1 in names_t2 and sep_j2 in names_t2):
+                    continue
+            
+            # Contrainte 2 : Forcer à jouer ensemble (même équipe)
+            if pair_j1 != "Aucune restriction" and pair_j2 != "Aucun":
+                if (pair_j1 in names_t1 and pair_j2 not in names_t1) or (pair_j1 in names_t2 and pair_j2 not in names_t2):
                     continue
             
             valid_combo_found = True
@@ -548,15 +556,43 @@ with tab1:
     st.write("---")
     
     if 0 < nb_selected <= 10:
-        st.markdown("### ⛔ Restriction d'affinité (Optionnel)")
-        j1 = st.selectbox("Sélectionner un joueur...", options=["Aucune restriction"] + sorted(selected_names), index=0)
-        remaining = [n for n in selected_names if n != j1] if j1 != "Aucune restriction" else []
-        j2 = st.selectbox("... à ne surtout pas faire jouer avec :", options=["Aucun"] + sorted(remaining), index=0) if j1 != "Aucune restriction" else "Aucun"
+        st.markdown("### ⚙️ Restrictions et Affinités (Optionnel)")
+        
+        col_res1, col_res2 = st.columns(2)
+        
+        with col_res1:
+            st.markdown("**⛔ Séparer deux joueurs (Ne pas faire jouer ensemble)**")
+            sep_j1 = st.selectbox("Sélectionner un joueur...", options=["Aucune restriction"] + sorted(selected_names), index=0, key="sep_j1")
+            remaining_sep = [n for n in selected_names if n != sep_j1] if sep_j1 != "Aucune restriction" else []
+            sep_j2 = st.selectbox("... à séparer de :", options=["Aucun"] + sorted(remaining_sep), index=0, key="sep_j2") if sep_j1 != "Aucune restriction" else "Aucun"
+        
+        with col_res2:
+            st.markdown("**🤝 Associer deux joueurs (Forcer à jouer ensemble)**")
+            pair_j1 = st.selectbox("Sélectionner un joueur...", options=["Aucune restriction"] + sorted(selected_names), index=0, key="pair_j1")
+            remaining_pair = [n for n in selected_names if n != pair_j1] if pair_j1 != "Aucune restriction" else []
+            pair_j2 = st.selectbox("... à faire jouer avec :", options=["Aucun"] + sorted(remaining_pair), index=0, key="pair_j2") if pair_j1 != "Aucune restriction" else "Aucun"
+
+        # Sécurité pour éviter de déclarer des règles contradictoires
+        conflict = False
+        if (sep_j1 != "Aucune restriction" and sep_j2 != "Aucun") and (pair_j1 != "Aucune restriction" and pair_j2 != "Aucun"):
+            set_sep = {sep_j1, sep_j2}
+            set_pair = {pair_j1, pair_j2}
+            if set_sep == set_pair:
+                st.error("⚠️ Incohérence : vous demandez à la fois de séparer et d'associer les deux mêmes joueurs !")
+                conflict = True
+
         st.write("")
         
-        if st.button("⚡ Générer l'Équilibrage Parfait", type="primary"):
+        if st.button("⚡ Générer l'Équilibrage Parfait", type="primary", disabled=conflict):
             if nb_selected < 10:
-                st.session_state.jokers_info = {'nb_missing': 10 - nb_selected, 'selected_players': selected_players, 'j1': j1, 'j2': j2}
+                st.session_state.jokers_info = {
+                    'nb_missing': 10 - nb_selected,
+                    'selected_players': selected_players,
+                    'sep_j1': sep_j1,
+                    'sep_j2': sep_j2,
+                    'pair_j1': pair_j1,
+                    'pair_j2': pair_j2
+                }
                 st.session_state.show_jokers_modal = True
                 st.rerun()
             else:
@@ -570,10 +606,17 @@ with tab1:
                     t1 = list(combo)
                     t2 = [p for p in players_list if p not in t1]
                     names_t1, names_t2 = [p['Nom du Joueur'] for p in t1], [p['Nom du Joueur'] for p in t2]
-                    if j1 != "Aucune restriction" and j2 != "Aucun":
-                        if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2): 
+                    
+                    # Contrainte 1 : Ne pas jouer ensemble
+                    if sep_j1 != "Aucune restriction" and sep_j2 != "Aucun":
+                        if (sep_j1 in names_t1 and sep_j2 in names_t1) or (sep_j1 in names_t2 and sep_j2 in names_t2): 
                             continue
                     
+                    # Contrainte 2 : Forcer à jouer ensemble
+                    if pair_j1 != "Aucune restriction" and pair_j2 != "Aucun":
+                        if (pair_j1 in names_t1 and pair_j2 not in names_t1) or (pair_j1 in names_t2 and pair_j2 not in names_t2):
+                            continue
+
                     valid_combo_found = True
                     df_t1, df_t2 = pd.DataFrame(t1), pd.DataFrame(t2)
                     t1_att, t1_def = df_t1['Attaque'].apply(text_to_score).sum(), df_t1['Défense'].apply(text_to_score).sum()
@@ -589,6 +632,8 @@ with tab1:
                     st.session_state.last_team2 = best_team2
                     st.session_state.open_teams_popup = True
                     st.rerun()
+                else:
+                    st.error("Impossible de trouver une combinaison respectant toutes les contraintes imposées.")
 
     if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
         st.write("---")
