@@ -139,13 +139,51 @@ def calculate_global_score(row):
     col = text_to_score(row.get("Collectif", 5))
     return round((att + defe + gk + col) / 4.0, 1)
 
+# --- PARSER WHATSAPP ROBUSTE ---
+def parse_whatsapp_convoc(raw_text):
+    """ Extrait les noms depuis n'importe quel format WhatsApp (lignes, listes, numérotations) """
+    text = raw_text.strip()
+    if not text:
+        return []
+    
+    # Chercher la section Présents si existante
+    presents_pattern = re.search(r'(?:Présents?|Dispos?|Joueurs?)\s*[:\-]\s*(.*)', text, re.IGNORECASE | re.DOTALL)
+    if presents_pattern:
+        target_section = presents_pattern.group(1)
+        # Stopper avant d'éventuelles sections suivantes (ex: "Absents :", "Attente :")
+        target_section = re.split(r'\n\s*(?:Absents?|Attente|Remplaçants?)\s*[:\-]', target_section, flags=re.IGNORECASE)[0]
+    else:
+        target_section = text
+
+    extracted = []
+    lines = target_section.splitlines()
+    for line in lines:
+        cleaned_line = line.strip()
+        if not cleaned_line:
+            continue
+        
+        # Supprime les marqueurs de liste : "1.", "1-", "-", "*", "•", "(1)", "[1]"
+        cleaned_line = re.sub(r'^(?:(?:\d+[\.\-\)]\s*)|(?:[\-\*•]\s*))', '', cleaned_line)
+        cleaned_line = re.sub(r'[\(\[\{]\s*\d+\s*[\)\]\}]', '', cleaned_line)
+        
+        # Sépare les joueurs multiples sur la même ligne (virgules, barres obliques)
+        parts = re.split(r'[,;/]+', cleaned_line)
+        for part in parts:
+            p = part.strip()
+            # Nettoyer les emojis et caractères non alphabétiques initiaux/finaux
+            p = re.sub(r'^[^\w]+|[^\w]+$', '', p, flags=re.UNICODE)
+            if p and len(p) >= 2 and not p.lower().startswith(('absent', 'présent', 'date', 'heure', 'stade')):
+                extracted.append(p)
+                
+    return extracted
+
 # --- GESTION BASE PRINCIPALE ---
 def load_data():
     if os.path.exists(DATA_FILE):
         try: 
             df = pd.read_excel(DATA_FILE)
             if df.empty or "Nom du Joueur" not in df.columns:
-                raise ValueError("Fichier vide ou corrompu")
+                raise ValueError("Fichier vide ou sans colonne 'Nom du Joueur'")
             if "Surnoms" not in df.columns:
                 df["Surnoms"] = ""
             if "Gardien" not in df.columns:
@@ -264,7 +302,7 @@ if st.session_state.get('show_landing', True):
     st.stop()
 
 # ==========================================
-# ⚽ FONCTIONS TERRAIN & DIALOGS
+# ⚽ TERRAIN & AFFICHAGE
 # ==========================================
 def create_player_card(card_path, player_name):
     if not os.path.exists(card_path):
@@ -367,7 +405,7 @@ def show_teams_popup(t1, t2):
     if st.button("Fermer"): 
         st.rerun()
 
-# --- POP-UP DÉDIÉ POUR RENSEIGNER LES JOKERS EN AMONT ---
+# --- POP-UP JOKERS EN AMONT ---
 @st.dialog("🃏 Configuration des Jokers", width="medium")
 def configure_jokers_dialog(target_count):
     st.write(f"Renseignez les **{target_count}** Jokers pour ce match :")
@@ -382,8 +420,6 @@ def configure_jokers_dialog(target_count):
     with st.form("form_configure_jokers"):
         for k in range(target_count):
             st.markdown(f"**Joker {k+1}**")
-            
-            # Pré-remplissage si déjà renseigné auparavant
             preset_name = current_jokers[k]['Nom du Joueur'] if k < len(current_jokers) else f"Joker {k+1}"
             preset_score = current_jokers[k]['Attaque'] if k < len(current_jokers) else 5
             
@@ -447,42 +483,86 @@ tab1, tab2, tab3 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la B
 # ----------------- ONGLET 1 : COMPOS -----------------
 with tab1:
     with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=False):
-        convoc_text = st.text_area("Colle le texte brut de ta convocation ici :", height=150, placeholder="Présents : nicoP (1) , dimeh(2)...")
+        convoc_text = st.text_area(
+            "Colle le texte brut de ta convocation ici :", 
+            height=150, 
+            placeholder="Exemples supportés :\nPrésents :\n1. Nico P\n2. Antho\n- Cyril V\nou : Présents : NicoP (1), Benoit(2)..."
+        )
         if st.button("🔍 Extraire et Valider les Joueurs"):
-            if convoc_text.strip():
-                match = re.search(r"Présents\s*:\s*(.*)", convoc_text, re.IGNORECASE)
-                if match:
-                    raw_presents = match.group(1).split("\n")[0]
-                    cleaned_line = re.sub(r"\(\s*\d+\s*\)", "", raw_presents)
-                    extracted_names = [n.strip() for n in re.split(r"[, ]+", cleaned_line) if n.strip()]
-                    
-                    df_db = st.session_state.players_df
-                    alias_map = {}
-                    for _, row in df_db.iterrows():
-                        real_name = row["Nom du Joueur"]
-                        alias_map.setdefault(real_name.lower(), []).append(real_name)
-                        for s in [x.strip().lower() for x in str(row["Surnoms"]).split(",") if x.strip()]:
-                            if real_name not in alias_map.setdefault(s, []): 
-                                alias_map[s].append(real_name)
-                    
-                    found_players, unknown_names, ambiguous_matches = set(), [], []
-                    for raw_name in extracted_names:
-                        key = raw_name.lower()
-                        if key in alias_map:
-                            candidates = alias_map[key]
-                            if len(candidates) == 1: 
-                                found_players.add(candidates[0])
-                            else: 
-                                ambiguous_matches.append({"convoc_name": raw_name, "candidates": candidates})
-                        else:
-                            unknown_names.append(raw_name)
-                    
-                    st.session_state.auto_selected = found_players
-                    st.session_state.unknown_names = unknown_names
-                    st.session_state.ambiguous_matches = ambiguous_matches
-                    if not unknown_names and not ambiguous_matches:
-                        st.success(f"✅ {len(found_players)} joueurs reconnus et cochés !")
-                        st.rerun()
+            extracted_names = parse_whatsapp_convoc(convoc_text)
+            if extracted_names:
+                df_db = st.session_state.players_df
+                alias_map = {}
+                for _, row in df_db.iterrows():
+                    real_name = row["Nom du Joueur"]
+                    alias_map.setdefault(real_name.lower(), []).append(real_name)
+                    for s in [x.strip().lower() for x in str(row["Surnoms"]).split(",") if x.strip()]:
+                        if real_name not in alias_map.setdefault(s, []): 
+                            alias_map[s].append(real_name)
+                
+                found_players, unknown_names, ambiguous_matches = set(), [], []
+                for raw_name in extracted_names:
+                    key = raw_name.lower()
+                    if key in alias_map:
+                        candidates = alias_map[key]
+                        if len(candidates) == 1: 
+                            found_players.add(candidates[0])
+                        else: 
+                            ambiguous_matches.append({"convoc_name": raw_name, "candidates": candidates})
+                    else:
+                        unknown_names.append(raw_name)
+                
+                st.session_state.auto_selected = found_players
+                st.session_state.unknown_names = unknown_names
+                st.session_state.ambiguous_matches = ambiguous_matches
+                if not unknown_names and not ambiguous_matches:
+                    st.success(f"✅ {len(found_players)} joueurs reconnus et cochés !")
+                    st.rerun()
+            else:
+                st.warning("Aucun nom valide n'a pu être extrait. Vérifiez le texte saisi.")
+
+    if 'ambiguous_matches' in st.session_state and st.session_state.ambiguous_matches:
+        st.warning("⚠️ **Garde-fou : Surnom partagé par plusieurs joueurs**")
+        current_amb = st.session_state.ambiguous_matches[0]
+        convoc_n = current_amb.get("convoc_name")
+        candidates = current_amb["candidates"]
+        
+        st.markdown(f"Le nom **'{convoc_n}'** correspond à plusieurs joueurs :")
+        selected_candidate = st.radio(f"Qui est '{convoc_n}' ?", options=candidates, key=f"amb_radio_{convoc_n}")
+        if st.button(f"Confirmé : c'est {selected_candidate}"):
+            st.session_state.auto_selected.add(selected_candidate)
+            st.session_state.ambiguous_matches.pop(0)
+            st.rerun()
+
+    if ('ambiguous_matches' not in st.session_state or not st.session_state.ambiguous_matches) and ('unknown_names' in st.session_state and st.session_state.unknown_names):
+        st.info("💡 **Joueur inconnu détecté :**")
+        db_names = sorted(list(st.session_state.players_df["Nom du Joueur"].values))
+        current_unknown = st.session_state.unknown_names[0]
+        choice = st.radio(f"Que faire pour '{current_unknown}' ?", ["Associer ce surnom à un joueur existant", "Créer un nouveau joueur"], key=f"ch_{current_unknown}")
+        if choice == "Associer ce surnom à un joueur existant":
+            linked_name = st.selectbox("Sélectionner :", options=db_names)
+            if st.button("Associer comme surnom"):
+                idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == linked_name].index[0]
+                old_s = str(st.session_state.players_df.loc[idx, "Surnoms"]).strip()
+                st.session_state.players_df.loc[idx, "Surnoms"] = f"{old_s}, {current_unknown}" if old_s else current_unknown
+                save_data(st.session_state.players_df)
+                st.session_state.auto_selected.add(linked_name)
+                st.session_state.unknown_names.pop(0)
+                st.rerun()
+        else:
+            with st.form(f"form_quick_{current_unknown}"):
+                c_nom = st.text_input("Nom officiel", value=current_unknown)
+                c_att = st.selectbox("Attaque", options=NUMERIC_OPTIONS, index=4)
+                c_def = st.selectbox("Défense", options=NUMERIC_OPTIONS, index=4)
+                c_gk  = st.selectbox("Gardien", options=NUMERIC_OPTIONS, index=4)
+                c_col = st.selectbox("Collectif", options=NUMERIC_OPTIONS, index=4)
+                if st.form_submit_button("Enregistrer et cocher"):
+                    new_p = pd.DataFrame({"Nom du Joueur": [c_nom.strip()], "Attaque": [c_att], "Défense": [c_def], "Gardien": [c_gk], "Collectif": [c_col], "Surnoms": [""]})
+                    st.session_state.players_df = pd.concat([st.session_state.players_df, new_p], ignore_index=True)
+                    save_data(st.session_state.players_df)
+                    st.session_state.auto_selected.add(c_nom.strip())
+                    st.session_state.unknown_names.pop(0)
+                    st.rerun()
 
     st.subheader("Sélection des présents")
     df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
@@ -503,13 +583,10 @@ with tab1:
                 
     selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)].copy()
     nb_regulars = len(selected_players)
-    
-    # Gestion des Jokers préparatoires
     current_jokers = st.session_state.get('session_jokers', [])
     nb_jokers = len(current_jokers)
     total_effective = nb_regulars + nb_jokers
 
-    # Bouton direct pour configurer ou ajuster les jokers en amont
     col_jk_btn1, col_jk_btn2 = st.columns([3, 1])
     with col_jk_btn1:
         if nb_regulars < 10:
@@ -525,7 +602,6 @@ with tab1:
                 st.session_state.session_jokers = []
                 st.rerun()
 
-    # Affichage dynamique du statut des effectifs
     if total_effective == 10:
         if nb_jokers > 0:
             counter_placeholder.success(f"✅ 10 joueurs prêts ! ({nb_regulars} titulaires + {nb_jokers} Jokers)")
@@ -538,44 +614,50 @@ with tab1:
         
     st.write("---")
     
-    # Rassemblement de tous les noms disponibles pour les restrictions (Titulaires + Jokers déjà saisis)
     jokers_names = [j['Nom du Joueur'] for j in current_jokers]
     all_active_names = sorted(selected_names + jokers_names)
 
     if len(all_active_names) > 0:
-        st.markdown("### ⚙️ Restrictions et Affinités (Titulaires & Jokers)")
+        st.markdown("### ⚙️ Restrictions et Affinités Multiples")
         
         col_res1, col_res2 = st.columns(2)
         with col_res1:
-            st.markdown("**⛔ Séparer deux joueurs (Ne pas faire jouer ensemble)**")
-            sep_j1 = st.selectbox("Sélectionner un joueur...", options=["Aucune restriction"] + all_active_names, index=0, key="sep_j1")
-            remaining_sep = [n for n in all_active_names if n != sep_j1] if sep_j1 != "Aucune restriction" else []
-            sep_j2 = st.selectbox("... à séparer de :", options=["Aucun"] + sorted(remaining_sep), index=0, key="sep_j2") if sep_j1 != "Aucune restriction" else "Aucun"
+            st.markdown("**⛔ Joueurs à NE PAS mettre ensemble (Séparation)**")
+            separated_group = st.multiselect(
+                "Sélectionnez plusieurs joueurs (ils ne pourront pas tous être dans la même équipe) :",
+                options=all_active_names,
+                default=[],
+                help="Empêche que tous ces joueurs se retrouvent réunis dans la même équipe."
+            )
         
         with col_res2:
-            st.markdown("**🤝 Associer deux joueurs (Forcer à jouer ensemble)**")
-            pair_j1 = st.selectbox("Sélectionner un joueur...", options=["Aucune restriction"] + all_active_names, index=0, key="pair_j1")
-            remaining_pair = [n for n in all_active_names if n != pair_j1] if pair_j1 != "Aucune restriction" else []
-            pair_j2 = st.selectbox("... à faire jouer avec :", options=["Aucun"] + sorted(remaining_pair), index=0, key="pair_j2") if pair_j1 != "Aucune restriction" else "Aucun"
+            st.markdown("**🤝 Joueurs à METTRE OBLIGATOIREMENT ensemble**")
+            paired_group = st.multiselect(
+                "Sélectionnez un groupe de joueurs (2 à 5) obligatoirement réunis :",
+                options=all_active_names,
+                default=[],
+                help="Force ces joueurs à faire partie intégrante de la même équipe."
+            )
 
         conflict = False
-        if (sep_j1 != "Aucune restriction" and sep_j2 != "Aucun") and (pair_j1 != "Aucune restriction" and pair_j2 != "Aucun"):
-            if {sep_j1, sep_j2} == {pair_j1, pair_j2}:
-                st.error("⚠️ Incohérence : vous demandez à la fois de séparer et d'associer les deux mêmes joueurs !")
-                conflict = True
+        if len(paired_group) > 5:
+            st.error("⚠️ Impossible d'associer plus de 5 joueurs dans une équipe de futsal à 5 !")
+            conflict = True
+        
+        # Conflit si un groupe associé est aussi inclus en totalité dans le groupe à séparer
+        if len(paired_group) >= 2 and set(paired_group).issubset(set(separated_group)):
+            st.error("⚠️ Incohérence : vous forcez un groupe de joueurs à jouer ensemble tout en leur interdisant d'être réunis !")
+            conflict = True
 
         st.write("")
         
         if st.button("⚡ Générer l'Équilibrage Parfait", type="primary", disabled=conflict):
             if total_effective < 10:
-                # Ouvre le dialogue s'il manque encore des jokers non renseignés
                 st.session_state.jokers_needed_count = 10 - nb_regulars
                 st.session_state.show_jokers_modal = True
                 st.rerun()
             elif total_effective == 10:
                 selected_players['is_joker'] = False
-                
-                # Fusion des réguliers et des jokers enregistrés
                 if nb_jokers > 0:
                     df_jokers = pd.DataFrame(current_jokers)
                     full_group_df = pd.concat([selected_players, df_jokers], ignore_index=True)
@@ -590,16 +672,19 @@ with tab1:
                 for combo in itertools.combinations(players_list, 5):
                     t1 = list(combo)
                     t2 = [p for p in players_list if p not in t1]
-                    names_t1, names_t2 = [p['Nom du Joueur'] for p in t1], [p['Nom du Joueur'] for p in t2]
+                    names_t1 = set(p['Nom du Joueur'] for p in t1)
+                    names_t2 = set(p['Nom du Joueur'] for p in t2)
                     
-                    # Contrainte 1 : Ne pas jouer ensemble
-                    if sep_j1 != "Aucune restriction" and sep_j2 != "Aucun":
-                        if (sep_j1 in names_t1 and sep_j2 in names_t1) or (sep_j1 in names_t2 and sep_j2 in names_t2): 
+                    # Contrainte Séparation multiple : les joueurs sélectionnés ne peuvent pas être TOUS dans la même équipe
+                    if len(separated_group) >= 2:
+                        set_sep = set(separated_group)
+                        if set_sep.issubset(names_t1) or set_sep.issubset(names_t2):
                             continue
                     
-                    # Contrainte 2 : Forcer à jouer ensemble
-                    if pair_j1 != "Aucune restriction" and pair_j2 != "Aucun":
-                        if (pair_j1 in names_t1 and pair_j2 not in names_t1) or (pair_j1 in names_t2 and pair_j2 not in names_t2):
+                    # Contrainte Association multiple : les joueurs sélectionnés doivent être TOUS dans la même équipe
+                    if len(paired_group) >= 2:
+                        set_pair = set(paired_group)
+                        if not (set_pair.issubset(names_t1) or set_pair.issubset(names_t2)):
                             continue
 
                     valid_combo_found = True
@@ -618,7 +703,7 @@ with tab1:
                     st.session_state.open_teams_popup = True
                     st.rerun()
                 else:
-                    st.error("Impossible de trouver une combinaison respectant toutes les contraintes imposées.")
+                    st.error("Aucune combinaison ne peut satisfaire à la fois l'équilibre et les contraintes multiples imposées.")
 
     if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
         st.write("---")
@@ -705,7 +790,7 @@ with tab2:
         st.success("✅ Fichier Excel sauvegardé avec backup !")
         st.rerun()
 
-# ----------------- ONGLET 3 : BASE JOKERS PROTÉGÉE -----------------
+# ----------------- ONGLET 3 : BASE JOKERS -----------------
 with tab3:
     st.header("Gestion de la Base des Jokers")
     st.caption("Cette base répertorie les joueurs externes récurrents pour faciliter leur sélection le jour du match.")
