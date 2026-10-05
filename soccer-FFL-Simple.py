@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import shutil
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from PIL import Image, ImageDraw, ImageFont
@@ -8,13 +9,11 @@ import io
 import itertools
 import re
 import base64
-import json
 from github import Github, GithubException
 
-# --- FICHIERS REQUIS ---
-DATA_FILE = 'database_joueurs_v2.xlsx'
-JOKERS_FILE = 'database_jokers.xlsx'
-HISTORY_FILE = 'history_v2.json'
+# Fichiers requis
+DATA_FILE = 'database_joueurs_v2.xlsx'       
+BACKUP_FILE = 'database_joueurs_v2_backup.xlsx'
 BLUE_CARD_PATH = 'card_blue.png'
 RED_CARD_PATH = 'card_red.png'
 YELLOW_CARD_PATH = 'card_yellow.png'
@@ -80,12 +79,12 @@ st.markdown(
     }
 
     .landing-wrapper {
+        position: relative;
         width: 100%;
         max-width: 900px;
         margin: 0 auto;
         display: flex;
-        flex-direction: column;
-        align-items: center;
+        justify-content: center;
     }
     .landing-img {
         width: 100%;
@@ -93,15 +92,42 @@ st.markdown(
         object-fit: contain;
         border-radius: 16px;
         box-shadow: 0 6px 25px rgba(0,0,0,0.6);
-        margin-bottom: 15px;
+    }
+    div[data-testid="stElementContainer"]:has(button[key="overlay_enter_btn"]) {
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        z-index: 10 !important;
+    }
+    button[key="overlay_enter_btn"] {
+        width: 100% !important;
+        height: 100% !important;
+        background: transparent !important;
+        border: none !important;
+        color: transparent !important;
+        cursor: pointer !important;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# --- FONCTION DE SYNCHRONISATION GITHUB ---
+# --- INITIALISATION DE L'ÉTAT DE L'APPLICATION ---
+if 'show_landing' not in st.session_state:
+    st.session_state['show_landing'] = True
+
+if 'db_editor_version' not in st.session_state:
+    st.session_state['db_editor_version'] = 0
+
+if 'auto_selected' not in st.session_state:
+    st.session_state.auto_selected = set()
+
+NUMERIC_OPTIONS = list(range(1, 11))
+
 def push_file_to_github(file_path: str, content_bytes: bytes, commit_message: str) -> bool:
+    """Pousse un fichier sur GitHub via l'API pour assurer la persistance permanente."""
     token = st.secrets.get("GITHUB_TOKEN")
     repo_name = st.secrets.get("GITHUB_REPO")
     branch = st.secrets.get("GITHUB_BRANCH", "main")
@@ -133,14 +159,11 @@ def push_file_to_github(file_path: str, content_bytes: bytes, commit_message: st
                 raise ge
         return True
     except Exception as e:
-        st.error(f"❌ Erreur de synchronisation GitHub ({file_path}) : {e}")
+        st.error(f"❌ Erreur lors de la synchronisation GitHub : {e}")
         return False
 
-# --- UTILITAIRES DE NOTATION ---
-NUMERIC_OPTIONS = list(range(1, 11))
-GK_OPTIONS = [0, 1]
-
 def text_to_score(val):
+    """Convertit n'importe quelle valeur en entier strict entre 1 et 10."""
     if pd.isna(val):
         return 5
     match = re.search(r'\d+', str(val))
@@ -148,69 +171,65 @@ def text_to_score(val):
         return max(1, min(10, int(match.group())))
     return 5
 
-def text_to_gk_score(val):
-    if pd.isna(val):
-        return 1
-    match = re.search(r'\d+', str(val))
-    if match:
-        num = int(match.group())
-        return 1 if num >= 1 else 0
-    return 1
-
 def calculate_global_score(row):
+    """Calcule la moyenne numérique directe des 4 compétences."""
     att = text_to_score(row.get("Attaque", 5))
     defe = text_to_score(row.get("Défense", 5))
+    gk = text_to_score(row.get("Gardien", 5))
     col = text_to_score(row.get("Collectif", 5))
-    return round((att + defe + col) / 3.0, 1)
+    avg = (att + defe + gk + col) / 4.0
+    return round(avg, 1)
 
-# --- CHARGEMENT / SAUVEGARDE BASE JOUEURS ---
 def load_data():
+    """Charge la dernière version du fichier Excel physique."""
     if os.path.exists(DATA_FILE):
         try: 
             df = pd.read_excel(DATA_FILE)
             if "Surnoms" not in df.columns:
                 df["Surnoms"] = ""
             if "Gardien" not in df.columns:
-                df["Gardien"] = 0
+                df["Gardien"] = 5
                 
-            df["Surnoms"] = df["Surnoms"].fillna("")
+            df["Surnoms"] = df["Surnoms"].fillna("").astype(str)
             
-            for col in ["Attaque", "Défense", "Collectif"]:
+            for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
                 if col in df.columns:
                     df[col] = df[col].apply(text_to_score)
+                else:
+                    df[col] = 5
+                    
+            ordered_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
+            existing = [c for c in ordered_cols if c in df.columns]
+            return df[existing]
+        except Exception as e: 
+            st.error(f"Erreur lors de la lecture de {DATA_FILE} : {e}")
             
-            if "Gardien" in df.columns:
-                df["Gardien"] = df["Gardien"].apply(text_to_gk_score)
-                
-            df["Note Globale"] = df.apply(calculate_global_score, axis=1)
-            return df
-        except Exception: 
-            pass
-            
-    df_default = pd.DataFrame({
+    return pd.DataFrame({
         "Nom du Joueur": ["Antho", "Cyril V", "Apou", "Benoit", "Nico P", "Mouyss", "Cédric", "Nico M", "David", "Cyril L"],
         "Attaque": [9, 5, 7, 9, 5, 7, 3, 7, 5, 3],
         "Défense": [5, 9, 5, 3, 9, 3, 9, 5, 7, 7],
-        "Gardien": [0, 0, 1, 0, 1, 0, 1, 0, 0, 0],
+        "Gardien": [3, 5, 7, 3, 7, 5, 9, 3, 5, 5],
         "Collectif": [7, 9, 7, 5, 7, 5, 7, 5, 5, 5],
         "Surnoms": ["", "Cyril", "", "beny", "nicop, nico", "mouys", "", "nicom, nico", "Dav, dimeh", "Cyril"]
     })
-    df_default["Note Globale"] = df_default.apply(calculate_global_score, axis=1)
-    return df_default
 
 def save_data(df):
+    """Crée un backup local, écrit le fichier Excel et synchronise sur GitHub."""
+    if os.path.exists(DATA_FILE):
+        try:
+            shutil.copyfile(DATA_FILE, BACKUP_FILE)
+        except Exception as e:
+            st.warning(f"⚠️ Impossible de créer le backup : {e}")
+
     clean_df = df.copy()
     if "Note Globale" in clean_df.columns:
         clean_df = clean_df.drop(columns=["Note Globale"])
     if "is_joker" in clean_df.columns:
         clean_df = clean_df.drop(columns=["is_joker"])
         
-    for col in ["Attaque", "Défense", "Collectif"]:
+    for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
         if col in clean_df.columns:
             clean_df[col] = clean_df[col].apply(text_to_score)
-            
-    if "Gardien" in clean_df.columns:
-        clean_df["Gardien"] = clean_df["Gardien"].apply(text_to_gk_score)
             
     ordered_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
     existing_cols = [c for c in ordered_cols if c in clean_df.columns]
@@ -223,114 +242,12 @@ def save_data(df):
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
         clean_df.to_excel(writer, index=False)
     buffer.seek(0)
-    
-    if push_file_to_github(DATA_FILE, buffer.getvalue(), "Mise à jour base joueurs"):
-        st.toast("Base joueurs enregistrée et synchronisée !", icon="☁️")
 
-# --- CHARGEMENT / SAUVEGARDE BASE JOKERS ---
-def load_jokers_db():
-    if os.path.exists(JOKERS_FILE):
-        try:
-            df = pd.read_excel(JOKERS_FILE)
-            for col in ["Attaque", "Défense", "Collectif", "Note Globale"]:
-                if col in df.columns:
-                    df[col] = df[col].apply(text_to_score)
-            if "Gardien" not in df.columns:
-                df["Gardien"] = 1
-            else:
-                df["Gardien"] = df["Gardien"].apply(text_to_gk_score)
-            return df
-        except Exception:
-            pass
-            
-    return pd.DataFrame({
-        "Nom Joker": [],
-        "Joueur Rattaché": [],
-        "Note Globale": [],
-        "Attaque": [],
-        "Défense": [],
-        "Gardien": [],
-        "Collectif": []
-    })
-
-def save_jokers_db(df):
-    clean_df = df.copy()
-    clean_df.to_excel(JOKERS_FILE, index=False)
-
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        clean_df.to_excel(writer, index=False)
-    buffer.seek(0)
-
-    if push_file_to_github(JOKERS_FILE, buffer.getvalue(), "Mise à jour base jokers"):
-        st.toast("Base jokers enregistrée et synchronisée !", icon="☁️")
-
-# --- HISTORIQUE ---
-def load_history():
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                history_list = []
-                for item in data:
-                    history_list.append({
-                        't1': pd.DataFrame(item['t1']),
-                        't2': pd.DataFrame(item['t2']),
-                        'date': item['date']
-                    })
-                return history_list
-        except Exception:
-            pass
-    return []
-
-def save_history(history_list):
-    try:
-        data_to_save = []
-        for item in history_list:
-            data_to_save.append({
-                't1': item['t1'].to_dict(orient='records'),
-                't2': item['t2'].to_dict(orient='records'),
-                'date': item['date']
-            })
-        json_content = json.dumps(data_to_save, ensure_ascii=False, indent=2)
-        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-            f.write(json_content)
-
-        push_file_to_github(HISTORY_FILE, json_content.encode('utf-8'), "Mise à jour historique matchs")
-    except Exception:
-        pass
-
-# --- INITIALISATION DE L'ÉTAT ---
-if 'show_landing' not in st.session_state:
-    st.session_state['show_landing'] = True
-
-if 'players_version' not in st.session_state:
-    st.session_state.players_version = 0
-
-if 'jokers_version' not in st.session_state:
-    st.session_state.jokers_version = 0
+    if push_file_to_github(DATA_FILE, buffer.getvalue(), "Mise à jour base joueurs [via Soccer FFL]"):
+        st.toast("Base synchronisée sur GitHub !", icon="☁️")
 
 if 'players_df' not in st.session_state:
     st.session_state.players_df = load_data()
-
-if 'jokers_db' not in st.session_state:
-    st.session_state.jokers_db = load_jokers_db()
-
-if 'history' not in st.session_state:
-    st.session_state.history = load_history()
-
-if 'selected_players_set' not in st.session_state:
-    st.session_state.selected_players_set = set()
-
-if 'jokers_list' not in st.session_state:
-    st.session_state.jokers_list = []
-
-def update_checkbox(player_name):
-    key = f"chk_{player_name}"
-    if st.session_state[key]:
-        st.session_state.selected_players_set.add(player_name)
-    else:
-        st.session_state.selected_players_set.discard(player_name)
 
 # ==========================================
 # 🖼️ PAGE DE GARDE
@@ -341,19 +258,20 @@ if st.session_state.get('show_landing', True):
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
-        st.markdown('<div class="landing-wrapper">', unsafe_allow_html=True)
         st.markdown(
             f"""
-            <img class="landing-img" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
+            <div class="landing-wrapper">
+                <img class="landing-img" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
+            </div>
             """, 
             unsafe_allow_html=True
         )
         
-        if st.button("🚀 ENTRER DANS L'APPLICATION", type="primary", use_container_width=True):
+        if st.button("Entrer dans l'application", key="overlay_enter_btn"):
             st.session_state['show_landing'] = False
             st.rerun()
-            
-        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("<p style='text-align: center; color: #888; margin-top: 15px;'>👆 Cliquez sur l'image pour accéder aux compositions</p>", unsafe_allow_html=True)
     else:
         st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`).")
         if st.button("🚀 ENTRER DANS L'APPLICATION", type="primary"):
@@ -363,7 +281,7 @@ if st.session_state.get('show_landing', True):
     st.stop()
 
 # ==========================================
-# ⚽ COMPOSITIONS ET RENDU TERRAIN
+# ⚽ FONCTIONS DU TERRAIN & DIALOGS
 # ==========================================
 def create_player_card(card_path, player_name):
     if not os.path.exists(card_path):
@@ -373,40 +291,23 @@ def create_player_card(card_path, player_name):
     draw = ImageDraw.Draw(card_img)
     w, h = card_img.size
     
-    font_size = max(20, int(w * 0.16))
+    y_pos = int(h * (2 / 3))
+    font_size = max(24, int(w * 0.18))
     try:
         font = ImageFont.truetype(FONT_PATH, font_size)
     except Exception:
         font = ImageFont.load_default()
         
-    stroke_w = max(2, int(font_size * 0.07))
+    text_bbox = draw.textbbox((0, 0), player_name.upper(), font=font)
+    text_w = text_bbox[2] - text_bbox[0]
+    text_h = text_bbox[3] - text_bbox[1]
     
-    if player_name.upper().startswith("JOKER"):
-        parts = player_name.upper().split(maxsplit=1)
-        line1 = parts[0]
-        line2 = parts[1] if len(parts) > 1 else ""
-        y_center = int(h * (2 / 3))
-        
-        bbox1 = draw.textbbox((0, 0), line1, font=font)
-        w1, h1 = bbox1[2] - bbox1[0], bbox1[3] - bbox1[1]
-        x1 = (w - w1) / 2
-        
-        bbox2 = draw.textbbox((0, 0), line2, font=font)
-        w2, h2 = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
-        x2 = (w - w2) / 2
-        
-        draw.text((x1, y_center - h1 - 2), line1, fill="black", font=font, stroke_width=stroke_w, stroke_fill="white")
-        draw.text((x2, y_center + 2), line2, fill="black", font=font, stroke_width=stroke_w, stroke_fill="white")
-    else:
-        y_pos = int(h * (2 / 3))
-        text_bbox = draw.textbbox((0, 0), player_name.upper(), font=font)
-        text_w = text_bbox[2] - text_bbox[0]
-        text_h = text_bbox[3] - text_bbox[1]
-        x_pos = (w - text_w) / 2
-        y_pos_centered = y_pos - (text_h / 2)
-        
-        draw.text((x_pos, y_pos_centered), player_name.upper(), fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
-        
+    x_pos = (w - text_w) / 2
+    y_pos_centered = y_pos - (text_h / 2)
+    
+    stroke_w = max(2, int(font_size * 0.07))
+    draw.text((x_pos, y_pos_centered), player_name.upper(), fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
+    
     return card_img
 
 def draw_combined_field(t1, t2):
@@ -416,213 +317,4 @@ def draw_combined_field(t1, t2):
     
     ax.plot([0, 100, 100, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
     ax.plot([50, 50], [0, 60], color='white', linewidth=2.0)
-    center_circle = patches.Circle((50, 30), 9, edgecolor='white', facecolor='none', linewidth=1.5)
-    ax.add_patch(center_circle)
-    ax.scatter(50, 30, color='white', s=15, zorder=2)
-    
-    ax.add_patch(patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5))
-    ax.scatter(9, 30, color='white', s=15, zorder=2)
-    ax.add_patch(patches.Rectangle((88, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5))
-    ax.scatter(91, 30, color='white', s=15, zorder=2)
-    
-    card_width = 13.5
-    card_height = 18.0
-    
-    pos1 = [(7, 30), (23, 13), (23, 47), (40, 17), (40, 43)]
-    players1 = t1.copy()
-    players1['Gk_Num'] = players1['Gardien'].apply(text_to_gk_score)
-    players1 = players1.sort_values(by="Gk_Num", ascending=False).reset_index(drop=True)
-    
-    for i, row in players1.iterrows():
-        if i >= len(pos1): break
-        x, y = pos1[i]
-        p_name = str(row['Nom du Joueur'])
-        is_joker = bool(row.get('is_joker', False))
-        
-        card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else BLUE_CARD_PATH
-        card_img = create_player_card(card_file, p_name)
-        
-        if card_img:
-            ax.imshow(card_img, extent=[x - card_width/2, x + card_width/2, y - card_height/2, y + card_height/2], zorder=3)
-        else:
-            circle_color = "#FFD700" if is_joker else "#1C6CF6"
-            ax.scatter(x, y, color=circle_color, s=350, edgecolors='white', linewidths=2.0, zorder=3)
-            ax.text(x, y - 5.5, p_name, color='black' if is_joker else 'white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
-        
-    pos2 = [(93, 30), (77, 13), (77, 47), (60, 17), (60, 43)]
-    players2 = t2.copy()
-    players2['Gk_Num'] = players2['Gardien'].apply(text_to_gk_score)
-    players2 = players2.sort_values(by="Gk_Num", ascending=False).reset_index(drop=True)
-    
-    for i, row in players2.iterrows():
-        if i >= len(pos2): break
-        x, y = pos2[i]
-        p_name = str(row['Nom du Joueur'])
-        is_joker = bool(row.get('is_joker', False))
-        
-        card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else RED_CARD_PATH
-        card_img = create_player_card(card_file, p_name)
-        
-        if card_img:
-            ax.imshow(card_img, extent=[x - card_width/2, x + card_width/2, y - card_height/2, y + card_height/2], zorder=3)
-        else:
-            circle_color = "#FFD700" if is_joker else "#E03131"
-            ax.scatter(x, y, color=circle_color, s=350, edgecolors='white', linewidths=2.0, zorder=3)
-            ax.text(x, y - 5.5, p_name, color='black' if is_joker else 'white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
-    
-    ax.text(25, 64, "ÉQUIPE 1", color='white', fontsize=16, weight='bold', ha='center', va='center')
-    ax.text(75, 64, "ÉQUIPE 2", color='white', fontsize=16, weight='bold', ha='center', va='center')
-    
-    ax.set_xlim(-6, 106)
-    ax.set_ylim(-4, 68)
-    ax.axis('off')
-    plt.tight_layout()
-    return fig
-
-def render_teams_summary(t1, t2):
-    att1, att2 = t1['Attaque'].apply(text_to_score).sum(), t2['Attaque'].apply(text_to_score).sum()
-    def1, def2 = t1['Défense'].apply(text_to_score).sum(), t2['Défense'].apply(text_to_score).sum()
-    col1, col2 = t1['Collectif'].apply(text_to_score).sum(), t2['Collectif'].apply(text_to_score).sum()
-    gk1, gk2 = t1['Gardien'].apply(text_to_gk_score).sum(), t2['Gardien'].apply(text_to_gk_score).sum()
-    
-    avg_att1, avg_att2 = att1 / len(t1), att2 / len(t2)
-    avg_def1, avg_def2 = def1 / len(t1), def2 / len(t2)
-    avg_col1, avg_col2 = col1 / len(t1), col2 / len(t2)
-    
-    st.markdown("### 📊 Récapitulatif des Niveaux d'Équipe")
-    
-    summary_data = {
-        "Compétence": ["Attaque (Moyenne)", "Défense (Moyenne)", "Collectif (Moyenne)", "Gardien(s) Spécialisé(s)"],
-        "🔵 Équipe 1": [f"{avg_att1:.1f} / 10 (Total: {att1})", f"{avg_def1:.1f} / 10 (Total: {def1})", f"{avg_col1:.1f} / 10 (Total: {col1})", f"{gk1} joueur(s)"],
-        "🔴 Équipe 2": [f"{avg_att2:.1f} / 10 (Total: {att2})", f"{avg_def2:.1f} / 10 (Total: {def2})", f"{avg_col2:.1f} / 10 (Total: {col2})", f"{gk2} joueur(s)"]
-    }
-    st.table(pd.DataFrame(summary_data))
-
-@st.dialog("Compositions du Match", width="large")
-def show_teams_popup(t1, t2):
-    st.write("Match équilibré généré avec succès ! 📸")
-    fig_combined = draw_combined_field(t1, t2)
-    st.pyplot(fig_combined, use_container_width=True)
-    
-    buf = io.BytesIO()
-    fig_combined.savefig(buf, format="png", bbox_inches='tight', dpi=250, facecolor='#226343')
-    buf.seek(0)
-    
-    st.download_button(label="📸 Télécharger l'image (PNG)", data=buf, file_name="Compositions_FFL.png", mime="image/png", type="primary")
-    st.write("---")
-    
-    text_whatsapp = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n"
-    text_whatsapp += "🔵 *ÉQUIPE 1* :\n"
-    for _, row in t1.iterrows():
-        text_whatsapp += f"• {row['Nom du Joueur']}\n"
-        
-    text_whatsapp += "\n🔴 *ÉQUIPE 2* :\n"
-    for _, row in t2.iterrows():
-        text_whatsapp += f"• {row['Nom du Joueur']}\n"
-        
-    st.markdown("**📋 Texte à copier pour WhatsApp (Noms uniquement) :**")
-    st.code(text_whatsapp, language="text")
-    
-    render_teams_summary(t1, t2)
-    
-    if st.button("Fermer"): 
-        st.rerun()
-
-def compute_best_teams(players_list, j1, j2, same_team_players):
-    best_diff = float('inf')
-    best_gk_diff = float('inf')
-    best_team1, best_team2 = None, None
-    valid_combo_found = False
-    
-    for combo in itertools.combinations(players_list, 5):
-        t1 = list(combo)
-        t2 = [p for p in players_list if p not in t1]
-        
-        names_t1 = set(p['Nom du Joueur'] for p in t1)
-        names_t2 = set(p['Nom du Joueur'] for p in t2)
-        
-        if same_team_players:
-            st_set = set(same_team_players)
-            if not (st_set.issubset(names_t1) or st_set.issubset(names_t2)):
-                continue
-
-        if j1 != "Aucune restriction" and j2 != "Aucun":
-            if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
-                continue
-        
-        valid_combo_found = True
-        df_t1 = pd.DataFrame(t1)
-        df_t2 = pd.DataFrame(t2)
-        
-        t1_gk_sum = df_t1['Gardien'].apply(text_to_gk_score).sum()
-        t2_gk_sum = df_t2['Gardien'].apply(text_to_gk_score).sum()
-        gk_diff = abs(t1_gk_sum - t2_gk_sum)
-        
-        t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
-        t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
-        t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
-        
-        t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
-        t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
-        t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
-        
-        field_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_col_sum - t2_col_sum)
-        
-        if (gk_diff < best_gk_diff) or (gk_diff == best_gk_diff and field_diff < best_diff):
-            best_gk_diff = gk_diff
-            best_diff = field_diff
-            best_team1 = df_t1
-            best_team2 = df_t2
-
-    return valid_combo_found, best_team1, best_team2
-
-# --- EN-TÊTE PRINCIPAL ---
-col_logo, col_title, col_home = st.columns([1, 5, 1])
-with col_logo:
-    if os.path.exists(LOGO_PATH):
-        st.image(LOGO_PATH, width=80)
-    else:
-        st.title("⚽")
-with col_title:
-    st.header("Soccer FFL Kompo")
-with col_home:
-    if st.button("🏠 Accueil"):
-        st.session_state['show_landing'] = True
-        st.rerun()
-
-if st.session_state.get("open_teams_popup", False):
-    st.session_state.open_teams_popup = False
-    show_teams_popup(st.session_state.last_team1, st.session_state.last_team2)
-
-tab1, tab2, tab3 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion des Bases", "📜 Historique"])
-
-# ==========================================
-# ⚖️ TAB 1 : ÉQUILIBRAGE
-# ==========================================
-with tab1:
-    with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=True):
-        convoc_text = st.text_area("Colle le texte brut de ta convocation ici :", height=150, placeholder="Présents :\n1. Cyril V\n2. Nico P\n3. Benoit...")
-        
-        if st.button("🔍 Extraire et Valider les Joueurs"):
-            if convoc_text.strip():
-                match_presents = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
-                target_text = match_presents.group(1) if match_presents else convoc_text
-
-                stop_pattern = r"(jokers?|à\s*confirmer|a\s*confirmer|absents?|infirmerie)"
-                split_parts = re.split(stop_pattern, target_text, flags=re.IGNORECASE)
-                valid_presents_text = split_parts[0]
-
-                raw_lines = re.split(r"[\n,;]+", valid_presents_text)
-                cleaned_items = []
-                
-                for line in raw_lines:
-                    clean = re.sub(r"^\s*[\d\.\-\*\•\(\)\:]+\s*", "", line.strip())
-                    clean = re.sub(r"\(\s*\d+\s*\)", "", clean).strip()
-                    if clean:
-                        cleaned_items.append(clean)
-
-                df_db = st.session_state.players_df
-                alias_map = {}
-                for _, row in df_db.iterrows():
-                    real_name = row["Nom du Joueur"]
-                    alias_
+    center_circle
