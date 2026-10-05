@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import os
-import shutil
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from PIL import Image, ImageDraw, ImageFont
@@ -9,13 +8,13 @@ import io
 import itertools
 import re
 import base64
+import json
+from github import Github, GithubException
 
-# Fichiers requis
-DATA_FILE = 'database_joueurs_v2.xlsx'       
-BACKUP_FILE = 'database_joueurs_v2_backup.xlsx'
+# --- FICHIERS REQUIS ---
+DATA_FILE = 'database_joueurs_v2.xlsx'
 JOKERS_FILE = 'database_jokers.xlsx'
-JOKERS_BACKUP_FILE = 'database_jokers_backup.xlsx'
-
+HISTORY_FILE = 'history_v2.json'
 BLUE_CARD_PATH = 'card_blue.png'
 RED_CARD_PATH = 'card_red.png'
 YELLOW_CARD_PATH = 'card_yellow.png'
@@ -81,12 +80,12 @@ st.markdown(
     }
 
     .landing-wrapper {
-        position: relative;
         width: 100%;
         max-width: 900px;
         margin: 0 auto;
         display: flex;
-        justify-content: center;
+        flex-direction: column;
+        align-items: center;
     }
     .landing-img {
         width: 100%;
@@ -94,35 +93,52 @@ st.markdown(
         object-fit: contain;
         border-radius: 16px;
         box-shadow: 0 6px 25px rgba(0,0,0,0.6);
-    }
-    div[data-testid="stElementContainer"]:has(button[key="overlay_enter_btn"]) {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-        z-index: 10 !important;
-    }
-    button[key="overlay_enter_btn"] {
-        width: 100% !important;
-        height: 100% !important;
-        background: transparent !important;
-        border: none !important;
-        color: transparent !important;
-        cursor: pointer !important;
+        margin-bottom: 15px;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-if 'show_landing' not in st.session_state:
-    st.session_state['show_landing'] = True
+# --- FONCTION DE SYNCHRONISATION GITHUB ---
+def push_file_to_github(file_path: str, content_bytes: bytes, commit_message: str) -> bool:
+    token = st.secrets.get("GITHUB_TOKEN")
+    repo_name = st.secrets.get("GITHUB_REPO")
+    branch = st.secrets.get("GITHUB_BRANCH", "main")
 
-if 'session_jokers' not in st.session_state:
-    st.session_state['session_jokers'] = []
+    if not token or not repo_name:
+        return False
 
+    try:
+        g = Github(token)
+        repo = g.get_repo(repo_name)
+        try:
+            file_content = repo.get_contents(file_path, ref=branch)
+            repo.update_file(
+                path=file_content.path,
+                message=commit_message,
+                content=content_bytes,
+                sha=file_content.sha,
+                branch=branch
+            )
+        except GithubException as ge:
+            if ge.status == 404:
+                repo.create_file(
+                    path=file_path,
+                    message=commit_message,
+                    content=content_bytes,
+                    branch=branch
+                )
+            else:
+                raise ge
+        return True
+    except Exception as e:
+        st.error(f"❌ Erreur de synchronisation GitHub ({file_path}) : {e}")
+        return False
+
+# --- UTILITAIRES DE NOTATION ---
 NUMERIC_OPTIONS = list(range(1, 11))
+GK_OPTIONS = [0, 1]
 
 def text_to_score(val):
     if pd.isna(val):
@@ -132,147 +148,189 @@ def text_to_score(val):
         return max(1, min(10, int(match.group())))
     return 5
 
+def text_to_gk_score(val):
+    if pd.isna(val):
+        return 1
+    match = re.search(r'\d+', str(val))
+    if match:
+        num = int(match.group())
+        return 1 if num >= 1 else 0
+    return 1
+
 def calculate_global_score(row):
     att = text_to_score(row.get("Attaque", 5))
     defe = text_to_score(row.get("Défense", 5))
-    gk = text_to_score(row.get("Gardien", 5))
     col = text_to_score(row.get("Collectif", 5))
-    return round((att + defe + gk + col) / 4.0, 1)
+    return round((att + defe + col) / 3.0, 1)
 
-# --- PARSER WHATSAPP ROBUSTE ---
-def parse_whatsapp_convoc(raw_text):
-    """ Extrait les noms depuis n'importe quel format WhatsApp (lignes, listes, numérotations) """
-    text = raw_text.strip()
-    if not text:
-        return []
-    
-    # Chercher la section Présents si existante
-    presents_pattern = re.search(r'(?:Présents?|Dispos?|Joueurs?)\s*[:\-]\s*(.*)', text, re.IGNORECASE | re.DOTALL)
-    if presents_pattern:
-        target_section = presents_pattern.group(1)
-        # Stopper avant d'éventuelles sections suivantes (ex: "Absents :", "Attente :")
-        target_section = re.split(r'\n\s*(?:Absents?|Attente|Remplaçants?)\s*[:\-]', target_section, flags=re.IGNORECASE)[0]
-    else:
-        target_section = text
-
-    extracted = []
-    lines = target_section.splitlines()
-    for line in lines:
-        cleaned_line = line.strip()
-        if not cleaned_line:
-            continue
-        
-        # Supprime les marqueurs de liste : "1.", "1-", "-", "*", "•", "(1)", "[1]"
-        cleaned_line = re.sub(r'^(?:(?:\d+[\.\-\)]\s*)|(?:[\-\*•]\s*))', '', cleaned_line)
-        cleaned_line = re.sub(r'[\(\[\{]\s*\d+\s*[\)\]\}]', '', cleaned_line)
-        
-        # Sépare les joueurs multiples sur la même ligne (virgules, barres obliques)
-        parts = re.split(r'[,;/]+', cleaned_line)
-        for part in parts:
-            p = part.strip()
-            # Nettoyer les emojis et caractères non alphabétiques initiaux/finaux
-            p = re.sub(r'^[^\w]+|[^\w]+$', '', p, flags=re.UNICODE)
-            if p and len(p) >= 2 and not p.lower().startswith(('absent', 'présent', 'date', 'heure', 'stade')):
-                extracted.append(p)
-                
-    return extracted
-
-# --- GESTION BASE PRINCIPALE ---
+# --- CHARGEMENT / SAUVEGARDE BASE JOUEURS ---
 def load_data():
     if os.path.exists(DATA_FILE):
         try: 
             df = pd.read_excel(DATA_FILE)
-            if df.empty or "Nom du Joueur" not in df.columns:
-                raise ValueError("Fichier vide ou sans colonne 'Nom du Joueur'")
             if "Surnoms" not in df.columns:
                 df["Surnoms"] = ""
             if "Gardien" not in df.columns:
-                df["Gardien"] = 5
-            df["Surnoms"] = df["Surnoms"].fillna("").astype(str)
-            for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
-                df[col] = df[col].apply(text_to_score) if col in df.columns else 5
-            ordered_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
-            return df[[c for c in ordered_cols if c in df.columns]]
+                df["Gardien"] = 0
+                
+            df["Surnoms"] = df["Surnoms"].fillna("")
+            
+            for col in ["Attaque", "Défense", "Collectif"]:
+                if col in df.columns:
+                    df[col] = df[col].apply(text_to_score)
+            
+            if "Gardien" in df.columns:
+                df["Gardien"] = df["Gardien"].apply(text_to_gk_score)
+                
+            df["Note Globale"] = df.apply(calculate_global_score, axis=1)
+            return df
         except Exception: 
             pass
             
-    default_df = pd.DataFrame({
+    df_default = pd.DataFrame({
         "Nom du Joueur": ["Antho", "Cyril V", "Apou", "Benoit", "Nico P", "Mouyss", "Cédric", "Nico M", "David", "Cyril L"],
         "Attaque": [9, 5, 7, 9, 5, 7, 3, 7, 5, 3],
         "Défense": [5, 9, 5, 3, 9, 3, 9, 5, 7, 7],
-        "Gardien": [3, 5, 7, 3, 7, 5, 9, 3, 5, 5],
+        "Gardien": [0, 0, 1, 0, 1, 0, 1, 0, 0, 0],
         "Collectif": [7, 9, 7, 5, 7, 5, 7, 5, 5, 5],
         "Surnoms": ["", "Cyril", "", "beny", "nicop, nico", "mouys", "", "nicom, nico", "Dav, dimeh", "Cyril"]
     })
-    default_df.to_excel(DATA_FILE, index=False)
-    return default_df
+    df_default["Note Globale"] = df_default.apply(calculate_global_score, axis=1)
+    return df_default
 
 def save_data(df):
-    if os.path.exists(DATA_FILE):
-        try: shutil.copyfile(DATA_FILE, BACKUP_FILE)
-        except Exception: pass
-
     clean_df = df.copy()
-    for col in ["Note Globale", "is_joker"]:
-        if col in clean_df.columns:
-            clean_df = clean_df.drop(columns=[col])
-    for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
+    if "Note Globale" in clean_df.columns:
+        clean_df = clean_df.drop(columns=["Note Globale"])
+    if "is_joker" in clean_df.columns:
+        clean_df = clean_df.drop(columns=["is_joker"])
+        
+    for col in ["Attaque", "Défense", "Collectif"]:
         if col in clean_df.columns:
             clean_df[col] = clean_df[col].apply(text_to_score)
+            
+    if "Gardien" in clean_df.columns:
+        clean_df["Gardien"] = clean_df["Gardien"].apply(text_to_gk_score)
+            
     ordered_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
     existing_cols = [c for c in ordered_cols if c in clean_df.columns]
     other_cols = [c for c in clean_df.columns if c not in ordered_cols]
-    clean_df[existing_cols + other_cols].to_excel(DATA_FILE, index=False)
+    clean_df = clean_df[existing_cols + other_cols]
+    
+    clean_df.to_excel(DATA_FILE, index=False)
 
-# --- GESTION BASE JOKERS ---
-def load_jokers():
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        clean_df.to_excel(writer, index=False)
+    buffer.seek(0)
+    
+    if push_file_to_github(DATA_FILE, buffer.getvalue(), "Mise à jour base joueurs"):
+        st.toast("Base joueurs enregistrée et synchronisée !", icon="☁️")
+
+# --- CHARGEMENT / SAUVEGARDE BASE JOKERS ---
+def load_jokers_db():
     if os.path.exists(JOKERS_FILE):
         try:
             df = pd.read_excel(JOKERS_FILE)
-            if not df.empty and "Nom du Joueur" in df.columns:
-                if "Surnoms" not in df.columns:
-                    df["Surnoms"] = ""
-                df["Surnoms"] = df["Surnoms"].fillna("").astype(str)
-                for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
-                    df[col] = df[col].apply(text_to_score) if col in df.columns else 5
-                ordered_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
-                return df[[c for c in ordered_cols if c in df.columns]]
+            for col in ["Attaque", "Défense", "Collectif", "Note Globale"]:
+                if col in df.columns:
+                    df[col] = df[col].apply(text_to_score)
+            if "Gardien" not in df.columns:
+                df["Gardien"] = 1
+            else:
+                df["Gardien"] = df["Gardien"].apply(text_to_gk_score)
+            return df
         except Exception:
             pass
-
-    default_jokers = pd.DataFrame({
-        "Nom du Joueur": ["Joker 1", "Joker 2"],
-        "Attaque": [5, 6],
-        "Défense": [5, 6],
-        "Gardien": [5, 5],
-        "Collectif": [5, 6],
-        "Surnoms": ["", ""]
+            
+    return pd.DataFrame({
+        "Nom Joker": [],
+        "Joueur Rattaché": [],
+        "Note Globale": [],
+        "Attaque": [],
+        "Défense": [],
+        "Gardien": [],
+        "Collectif": []
     })
-    default_jokers.to_excel(JOKERS_FILE, index=False)
-    return default_jokers
 
-def save_jokers(df):
-    if os.path.exists(JOKERS_FILE):
-        try: shutil.copyfile(JOKERS_FILE, JOKERS_BACKUP_FILE)
-        except Exception: pass
-
+def save_jokers_db(df):
     clean_df = df.copy()
-    for col in ["Note Globale", "is_joker"]:
-        if col in clean_df.columns:
-            clean_df = clean_df.drop(columns=[col])
-    for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
-        if col in clean_df.columns:
-            clean_df[col] = clean_df[col].apply(text_to_score)
-    ordered_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
-    existing_cols = [c for c in ordered_cols if c in clean_df.columns]
-    other_cols = [c for c in clean_df.columns if c not in ordered_cols]
-    clean_df[existing_cols + other_cols].to_excel(JOKERS_FILE, index=False)
+    clean_df.to_excel(JOKERS_FILE, index=False)
 
-st.session_state.players_df = load_data()
-st.session_state.jokers_df = load_jokers()
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        clean_df.to_excel(writer, index=False)
+    buffer.seek(0)
 
-if 'auto_selected' not in st.session_state:
-    st.session_state.auto_selected = set()
+    if push_file_to_github(JOKERS_FILE, buffer.getvalue(), "Mise à jour base jokers"):
+        st.toast("Base jokers enregistrée et synchronisée !", icon="☁️")
+
+# --- HISTORIQUE ---
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                history_list = []
+                for item in data:
+                    history_list.append({
+                        't1': pd.DataFrame(item['t1']),
+                        't2': pd.DataFrame(item['t2']),
+                        'date': item['date']
+                    })
+                return history_list
+        except Exception:
+            pass
+    return []
+
+def save_history(history_list):
+    try:
+        data_to_save = []
+        for item in history_list:
+            data_to_save.append({
+                't1': item['t1'].to_dict(orient='records'),
+                't2': item['t2'].to_dict(orient='records'),
+                'date': item['date']
+            })
+        json_content = json.dumps(data_to_save, ensure_ascii=False, indent=2)
+        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+            f.write(json_content)
+
+        push_file_to_github(HISTORY_FILE, json_content.encode('utf-8'), "Mise à jour historique matchs")
+    except Exception:
+        pass
+
+# --- INITIALISATION DE L'ÉTAT ---
+if 'show_landing' not in st.session_state:
+    st.session_state['show_landing'] = True
+
+if 'players_version' not in st.session_state:
+    st.session_state.players_version = 0
+
+if 'jokers_version' not in st.session_state:
+    st.session_state.jokers_version = 0
+
+if 'players_df' not in st.session_state:
+    st.session_state.players_df = load_data()
+
+if 'jokers_db' not in st.session_state:
+    st.session_state.jokers_db = load_jokers_db()
+
+if 'history' not in st.session_state:
+    st.session_state.history = load_history()
+
+if 'selected_players_set' not in st.session_state:
+    st.session_state.selected_players_set = set()
+
+if 'jokers_list' not in st.session_state:
+    st.session_state.jokers_list = []
+
+def update_checkbox(player_name):
+    key = f"chk_{player_name}"
+    if st.session_state[key]:
+        st.session_state.selected_players_set.add(player_name)
+    else:
+        st.session_state.selected_players_set.discard(player_name)
 
 # ==========================================
 # 🖼️ PAGE DE GARDE
@@ -282,104 +340,163 @@ if st.session_state.get('show_landing', True):
         with open(IMAGE_PATH, "rb") as f:
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+        
+        st.markdown('<div class="landing-wrapper">', unsafe_allow_html=True)
         st.markdown(
             f"""
-            <div class="landing-wrapper">
-                <img class="landing-img" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
-            </div>
+            <img class="landing-img" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
             """, 
             unsafe_allow_html=True
         )
-        if st.button("Entrer dans l'application", key="overlay_enter_btn"):
+        
+        if st.button("🚀 ENTRER DANS L'APPLICATION", type="primary", use_container_width=True):
             st.session_state['show_landing'] = False
             st.rerun()
-        st.markdown("<p style='text-align: center; color: #888; margin-top: 15px;'>👆 Cliquez sur l'image pour accéder aux compositions</p>", unsafe_allow_html=True)
+            
+        st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`).")
         if st.button("🚀 ENTRER DANS L'APPLICATION", type="primary"):
             st.session_state['show_landing'] = False
             st.rerun()
+
     st.stop()
 
 # ==========================================
-# ⚽ TERRAIN & AFFICHAGE
+# ⚽ COMPOSITIONS ET RENDU TERRAIN
 # ==========================================
 def create_player_card(card_path, player_name):
     if not os.path.exists(card_path):
         return None
+    
     card_img = Image.open(card_path).convert("RGBA")
     draw = ImageDraw.Draw(card_img)
     w, h = card_img.size
-    y_pos = int(h * (2 / 3))
-    font_size = max(24, int(w * 0.18))
-    try: font = ImageFont.truetype(FONT_PATH, font_size)
-    except Exception: font = ImageFont.load_default()
-    text_bbox = draw.textbbox((0, 0), player_name.upper(), font=font)
-    x_pos = (w - (text_bbox[2] - text_bbox[0])) / 2
-    y_pos_centered = y_pos - ((text_bbox[3] - text_bbox[1]) / 2)
+    
+    font_size = max(20, int(w * 0.16))
+    try:
+        font = ImageFont.truetype(FONT_PATH, font_size)
+    except Exception:
+        font = ImageFont.load_default()
+        
     stroke_w = max(2, int(font_size * 0.07))
-    draw.text((x_pos, y_pos_centered), player_name.upper(), fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
+    
+    if player_name.upper().startswith("JOKER"):
+        parts = player_name.upper().split(maxsplit=1)
+        line1 = parts[0]
+        line2 = parts[1] if len(parts) > 1 else ""
+        y_center = int(h * (2 / 3))
+        
+        bbox1 = draw.textbbox((0, 0), line1, font=font)
+        w1, h1 = bbox1[2] - bbox1[0], bbox1[3] - bbox1[1]
+        x1 = (w - w1) / 2
+        
+        bbox2 = draw.textbbox((0, 0), line2, font=font)
+        w2, h2 = bbox2[2] - bbox2[0], bbox2[3] - bbox2[1]
+        x2 = (w - w2) / 2
+        
+        draw.text((x1, y_center - h1 - 2), line1, fill="black", font=font, stroke_width=stroke_w, stroke_fill="white")
+        draw.text((x2, y_center + 2), line2, fill="black", font=font, stroke_width=stroke_w, stroke_fill="white")
+    else:
+        y_pos = int(h * (2 / 3))
+        text_bbox = draw.textbbox((0, 0), player_name.upper(), font=font)
+        text_w = text_bbox[2] - text_bbox[0]
+        text_h = text_bbox[3] - text_bbox[1]
+        x_pos = (w - text_w) / 2
+        y_pos_centered = y_pos - (text_h / 2)
+        
+        draw.text((x_pos, y_pos_centered), player_name.upper(), fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
+        
     return card_img
 
 def draw_combined_field(t1, t2):
     fig, ax = plt.subplots(figsize=(10, 6.5))
     fig.patch.set_facecolor('#226343')
     ax.set_facecolor('#226343')
+    
     ax.plot([0, 100, 100, 0, 0], [0, 0, 60, 60, 0], color='white', linewidth=2.0)
     ax.plot([50, 50], [0, 60], color='white', linewidth=2.0)
     center_circle = patches.Circle((50, 30), 9, edgecolor='white', facecolor='none', linewidth=1.5)
     ax.add_patch(center_circle)
     ax.scatter(50, 30, color='white', s=15, zorder=2)
+    
     ax.add_patch(patches.Rectangle((0, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5))
     ax.scatter(9, 30, color='white', s=15, zorder=2)
     ax.add_patch(patches.Rectangle((88, 15), 12, 30, edgecolor='white', facecolor='none', linewidth=1.5))
     ax.scatter(91, 30, color='white', s=15, zorder=2)
     
-    card_width, card_height = 13.5, 18.0
+    card_width = 13.5
+    card_height = 18.0
     
-    # Équipe 1
     pos1 = [(7, 30), (23, 13), (23, 47), (40, 17), (40, 43)]
     players1 = t1.copy()
-    players1['Gk_Num'] = players1['Gardien'].apply(text_to_score)
+    players1['Gk_Num'] = players1['Gardien'].apply(text_to_gk_score)
     players1 = players1.sort_values(by="Gk_Num", ascending=False).reset_index(drop=True)
+    
     for i, row in players1.iterrows():
         if i >= len(pos1): break
         x, y = pos1[i]
         p_name = str(row['Nom du Joueur'])
         is_joker = bool(row.get('is_joker', False))
+        
         card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else BLUE_CARD_PATH
         card_img = create_player_card(card_file, p_name)
+        
         if card_img:
             ax.imshow(card_img, extent=[x - card_width/2, x + card_width/2, y - card_height/2, y + card_height/2], zorder=3)
         else:
-            ax.scatter(x, y, color="#FFD700" if is_joker else "#1C6CF6", s=350, edgecolors='white', linewidths=2.0, zorder=3)
+            circle_color = "#FFD700" if is_joker else "#1C6CF6"
+            ax.scatter(x, y, color=circle_color, s=350, edgecolors='white', linewidths=2.0, zorder=3)
             ax.text(x, y - 5.5, p_name, color='black' if is_joker else 'white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
-
-    # Équipe 2
+        
     pos2 = [(93, 30), (77, 13), (77, 47), (60, 17), (60, 43)]
     players2 = t2.copy()
-    players2['Gk_Num'] = players2['Gardien'].apply(text_to_score)
+    players2['Gk_Num'] = players2['Gardien'].apply(text_to_gk_score)
     players2 = players2.sort_values(by="Gk_Num", ascending=False).reset_index(drop=True)
+    
     for i, row in players2.iterrows():
         if i >= len(pos2): break
         x, y = pos2[i]
         p_name = str(row['Nom du Joueur'])
         is_joker = bool(row.get('is_joker', False))
+        
         card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else RED_CARD_PATH
         card_img = create_player_card(card_file, p_name)
+        
         if card_img:
             ax.imshow(card_img, extent=[x - card_width/2, x + card_width/2, y - card_height/2, y + card_height/2], zorder=3)
         else:
-            ax.scatter(x, y, color="#FFD700" if is_joker else "#E03131", s=350, edgecolors='white', linewidths=2.0, zorder=3)
+            circle_color = "#FFD700" if is_joker else "#E03131"
+            ax.scatter(x, y, color=circle_color, s=350, edgecolors='white', linewidths=2.0, zorder=3)
             ax.text(x, y - 5.5, p_name, color='black' if is_joker else 'white', fontsize=12, weight='bold', ha='center', va='center', zorder=4)
-
+    
     ax.text(25, 64, "ÉQUIPE 1", color='white', fontsize=16, weight='bold', ha='center', va='center')
     ax.text(75, 64, "ÉQUIPE 2", color='white', fontsize=16, weight='bold', ha='center', va='center')
+    
     ax.set_xlim(-6, 106)
     ax.set_ylim(-4, 68)
     ax.axis('off')
     plt.tight_layout()
     return fig
+
+def render_teams_summary(t1, t2):
+    att1, att2 = t1['Attaque'].apply(text_to_score).sum(), t2['Attaque'].apply(text_to_score).sum()
+    def1, def2 = t1['Défense'].apply(text_to_score).sum(), t2['Défense'].apply(text_to_score).sum()
+    col1, col2 = t1['Collectif'].apply(text_to_score).sum(), t2['Collectif'].apply(text_to_score).sum()
+    gk1, gk2 = t1['Gardien'].apply(text_to_gk_score).sum(), t2['Gardien'].apply(text_to_gk_score).sum()
+    
+    avg_att1, avg_att2 = att1 / len(t1), att2 / len(t2)
+    avg_def1, avg_def2 = def1 / len(t1), def2 / len(t2)
+    avg_col1, avg_col2 = col1 / len(t1), col2 / len(t2)
+    
+    st.markdown("### 📊 Récapitulatif des Niveaux d'Équipe")
+    
+    summary_data = {
+        "Compétence": ["Attaque (Moyenne)", "Défense (Moyenne)", "Collectif (Moyenne)", "Gardien(s) Spécialisé(s)"],
+        "🔵 Équipe 1": [f"{avg_att1:.1f} / 10 (Total: {att1})", f"{avg_def1:.1f} / 10 (Total: {def1})", f"{avg_col1:.1f} / 10 (Total: {col1})", f"{gk1} joueur(s)"],
+        "🔴 Équipe 2": [f"{avg_att2:.1f} / 10 (Total: {att2})", f"{avg_def2:.1f} / 10 (Total: {def2})", f"{avg_col2:.1f} / 10 (Total: {col2})", f"{gk2} joueur(s)"]
+    }
+    st.table(pd.DataFrame(summary_data))
 
 @st.dialog("Compositions du Match", width="large")
 def show_teams_popup(t1, t2):
@@ -394,72 +511,77 @@ def show_teams_popup(t1, t2):
     st.download_button(label="📸 Télécharger l'image (PNG)", data=buf, file_name="Compositions_FFL.png", mime="image/png", type="primary")
     st.write("---")
     
-    text_whatsapp = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n🔵 *ÉQUIPE 1* :\n"
-    for _, row in t1.iterrows(): 
+    text_whatsapp = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n"
+    text_whatsapp += "🔵 *ÉQUIPE 1* :\n"
+    for _, row in t1.iterrows():
         text_whatsapp += f"• {row['Nom du Joueur']}\n"
+        
     text_whatsapp += "\n🔴 *ÉQUIPE 2* :\n"
-    for _, row in t2.iterrows(): 
+    for _, row in t2.iterrows():
         text_whatsapp += f"• {row['Nom du Joueur']}\n"
+        
     st.markdown("**📋 Texte à copier pour WhatsApp (Noms uniquement) :**")
     st.code(text_whatsapp, language="text")
+    
+    render_teams_summary(t1, t2)
+    
     if st.button("Fermer"): 
         st.rerun()
 
-# --- POP-UP JOKERS EN AMONT ---
-@st.dialog("🃏 Configuration des Jokers", width="medium")
-def configure_jokers_dialog(target_count):
-    st.write(f"Renseignez les **{target_count}** Jokers pour ce match :")
+def compute_best_teams(players_list, j1, j2, same_team_players):
+    best_diff = float('inf')
+    best_gk_diff = float('inf')
+    best_team1, best_team2 = None, None
+    valid_combo_found = False
     
-    jokers_source = st.session_state.jokers_df
-    saved_jokers_names = list(jokers_source["Nom du Joueur"].unique()) if "Nom du Joueur" in jokers_source.columns else []
-    saved_jokers_list = ["-- Saisir un invité libre --"] + saved_jokers_names
-    
-    current_jokers = st.session_state.get('session_jokers', [])
-    temp_inputs = []
-    
-    with st.form("form_configure_jokers"):
-        for k in range(target_count):
-            st.markdown(f"**Joker {k+1}**")
-            preset_name = current_jokers[k]['Nom du Joueur'] if k < len(current_jokers) else f"Joker {k+1}"
-            preset_score = current_jokers[k]['Attaque'] if k < len(current_jokers) else 5
-            
-            choice = st.selectbox(f"Depuis la base des Jokers :", options=saved_jokers_list, key=f"cfg_preset_{k}")
-            c_name, c_score = st.columns([2, 1])
-            with c_name:
-                final_name = choice if choice != "-- Saisir un invité libre --" else preset_name
-                j_name = st.text_input("Nom / Prénom", value=final_name, key=f"cfg_name_{k}")
-            with c_score:
-                if choice != "-- Saisir un invité libre --":
-                    row_j = jokers_source[jokers_source["Nom du Joueur"] == choice]
-                    if not row_j.empty:
-                        preset_score = int(calculate_global_score(row_j.iloc[0]))
-                j_score = st.number_input("Note (1-10)", min_value=1, max_value=10, value=preset_score, key=f"cfg_score_{k}")
-                
-            temp_inputs.append((j_name.strip(), j_score))
-            st.write("---")
-            
-        btn_valid = st.form_submit_button("✅ Valider et intégrer les Jokers", type="primary")
+    for combo in itertools.combinations(players_list, 5):
+        t1 = list(combo)
+        t2 = [p for p in players_list if p not in t1]
         
-    if btn_valid:
-        new_jokers = []
-        for j_name, j_score in temp_inputs:
-            num = text_to_score(j_score)
-            display_name = f"Joker {j_name}" if not j_name.lower().startswith("joker") else j_name
-            new_jokers.append({
-                "Nom du Joueur": display_name,
-                "Attaque": num, "Défense": num, "Gardien": num, "Collectif": num,
-                "Surnoms": "", "is_joker": True
-            })
-        st.session_state.session_jokers = new_jokers
-        st.session_state.show_jokers_modal = False
-        st.rerun()
+        names_t1 = set(p['Nom du Joueur'] for p in t1)
+        names_t2 = set(p['Nom du Joueur'] for p in t2)
+        
+        if same_team_players:
+            st_set = set(same_team_players)
+            if not (st_set.issubset(names_t1) or st_set.issubset(names_t2)):
+                continue
+
+        if j1 != "Aucune restriction" and j2 != "Aucun":
+            if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
+                continue
+        
+        valid_combo_found = True
+        df_t1 = pd.DataFrame(t1)
+        df_t2 = pd.DataFrame(t2)
+        
+        t1_gk_sum = df_t1['Gardien'].apply(text_to_gk_score).sum()
+        t2_gk_sum = df_t2['Gardien'].apply(text_to_gk_score).sum()
+        gk_diff = abs(t1_gk_sum - t2_gk_sum)
+        
+        t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
+        t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
+        t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
+        
+        t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
+        t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
+        t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
+        
+        field_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_col_sum - t2_col_sum)
+        
+        if (gk_diff < best_gk_diff) or (gk_diff == best_gk_diff and field_diff < best_diff):
+            best_gk_diff = gk_diff
+            best_diff = field_diff
+            best_team1 = df_t1
+            best_team2 = df_t2
+
+    return valid_combo_found, best_team1, best_team2
 
 # --- EN-TÊTE PRINCIPAL ---
 col_logo, col_title, col_home = st.columns([1, 5, 1])
 with col_logo:
-    if os.path.exists(LOGO_PATH): 
+    if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, width=80)
-    else: 
+    else:
         st.title("⚽")
 with col_title:
     st.header("Soccer FFL Kompo")
@@ -468,408 +590,39 @@ with col_home:
         st.session_state['show_landing'] = True
         st.rerun()
 
-if st.session_state.get("show_jokers_modal", False):
-    configure_jokers_dialog(st.session_state.get('jokers_needed_count', 1))
-
 if st.session_state.get("open_teams_popup", False):
     st.session_state.open_teams_popup = False
     show_teams_popup(st.session_state.last_team1, st.session_state.last_team2)
 
-# ==========================================
-# 📑 LES 3 ONGLETS
-# ==========================================
-tab1, tab2, tab3 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion de la Base", "🃏 Base des Jokers"])
+tab1, tab2, tab3 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion des Bases", "📜 Historique"])
 
-# ----------------- ONGLET 1 : COMPOS -----------------
+# ==========================================
+# ⚖️ TAB 1 : ÉQUILIBRAGE
+# ==========================================
 with tab1:
-    with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=False):
-        convoc_text = st.text_area(
-            "Colle le texte brut de ta convocation ici :", 
-            height=150, 
-            placeholder="Exemples supportés :\nPrésents :\n1. Nico P\n2. Antho\n- Cyril V\nou : Présents : NicoP (1), Benoit(2)..."
-        )
+    with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=True):
+        convoc_text = st.text_area("Colle le texte brut de ta convocation ici :", height=150, placeholder="Présents :\n1. Cyril V\n2. Nico P\n3. Benoit...")
+        
         if st.button("🔍 Extraire et Valider les Joueurs"):
-            extracted_names = parse_whatsapp_convoc(convoc_text)
-            if extracted_names:
+            if convoc_text.strip():
+                match_presents = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
+                target_text = match_presents.group(1) if match_presents else convoc_text
+
+                stop_pattern = r"(jokers?|à\s*confirmer|a\s*confirmer|absents?|infirmerie)"
+                split_parts = re.split(stop_pattern, target_text, flags=re.IGNORECASE)
+                valid_presents_text = split_parts[0]
+
+                raw_lines = re.split(r"[\n,;]+", valid_presents_text)
+                cleaned_items = []
+                
+                for line in raw_lines:
+                    clean = re.sub(r"^\s*[\d\.\-\*\•\(\)\:]+\s*", "", line.strip())
+                    clean = re.sub(r"\(\s*\d+\s*\)", "", clean).strip()
+                    if clean:
+                        cleaned_items.append(clean)
+
                 df_db = st.session_state.players_df
                 alias_map = {}
                 for _, row in df_db.iterrows():
                     real_name = row["Nom du Joueur"]
-                    alias_map.setdefault(real_name.lower(), []).append(real_name)
-                    for s in [x.strip().lower() for x in str(row["Surnoms"]).split(",") if x.strip()]:
-                        if real_name not in alias_map.setdefault(s, []): 
-                            alias_map[s].append(real_name)
-                
-                found_players, unknown_names, ambiguous_matches = set(), [], []
-                for raw_name in extracted_names:
-                    key = raw_name.lower()
-                    if key in alias_map:
-                        candidates = alias_map[key]
-                        if len(candidates) == 1: 
-                            found_players.add(candidates[0])
-                        else: 
-                            ambiguous_matches.append({"convoc_name": raw_name, "candidates": candidates})
-                    else:
-                        unknown_names.append(raw_name)
-                
-                st.session_state.auto_selected = found_players
-                st.session_state.unknown_names = unknown_names
-                st.session_state.ambiguous_matches = ambiguous_matches
-                if not unknown_names and not ambiguous_matches:
-                    st.success(f"✅ {len(found_players)} joueurs reconnus et cochés !")
-                    st.rerun()
-            else:
-                st.warning("Aucun nom valide n'a pu être extrait. Vérifiez le texte saisi.")
-
-    if 'ambiguous_matches' in st.session_state and st.session_state.ambiguous_matches:
-        st.warning("⚠️ **Garde-fou : Surnom partagé par plusieurs joueurs**")
-        current_amb = st.session_state.ambiguous_matches[0]
-        convoc_n = current_amb.get("convoc_name")
-        candidates = current_amb["candidates"]
-        
-        st.markdown(f"Le nom **'{convoc_n}'** correspond à plusieurs joueurs :")
-        selected_candidate = st.radio(f"Qui est '{convoc_n}' ?", options=candidates, key=f"amb_radio_{convoc_n}")
-        if st.button(f"Confirmé : c'est {selected_candidate}"):
-            st.session_state.auto_selected.add(selected_candidate)
-            st.session_state.ambiguous_matches.pop(0)
-            st.rerun()
-
-    if ('ambiguous_matches' not in st.session_state or not st.session_state.ambiguous_matches) and ('unknown_names' in st.session_state and st.session_state.unknown_names):
-        st.info("💡 **Joueur inconnu détecté :**")
-        db_names = sorted(list(st.session_state.players_df["Nom du Joueur"].values))
-        current_unknown = st.session_state.unknown_names[0]
-        choice = st.radio(f"Que faire pour '{current_unknown}' ?", ["Associer ce surnom à un joueur existant", "Créer un nouveau joueur"], key=f"ch_{current_unknown}")
-        if choice == "Associer ce surnom à un joueur existant":
-            linked_name = st.selectbox("Sélectionner :", options=db_names)
-            if st.button("Associer comme surnom"):
-                idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == linked_name].index[0]
-                old_s = str(st.session_state.players_df.loc[idx, "Surnoms"]).strip()
-                st.session_state.players_df.loc[idx, "Surnoms"] = f"{old_s}, {current_unknown}" if old_s else current_unknown
-                save_data(st.session_state.players_df)
-                st.session_state.auto_selected.add(linked_name)
-                st.session_state.unknown_names.pop(0)
-                st.rerun()
-        else:
-            with st.form(f"form_quick_{current_unknown}"):
-                c_nom = st.text_input("Nom officiel", value=current_unknown)
-                c_att = st.selectbox("Attaque", options=NUMERIC_OPTIONS, index=4)
-                c_def = st.selectbox("Défense", options=NUMERIC_OPTIONS, index=4)
-                c_gk  = st.selectbox("Gardien", options=NUMERIC_OPTIONS, index=4)
-                c_col = st.selectbox("Collectif", options=NUMERIC_OPTIONS, index=4)
-                if st.form_submit_button("Enregistrer et cocher"):
-                    new_p = pd.DataFrame({"Nom du Joueur": [c_nom.strip()], "Attaque": [c_att], "Défense": [c_def], "Gardien": [c_gk], "Collectif": [c_col], "Surnoms": [""]})
-                    st.session_state.players_df = pd.concat([st.session_state.players_df, new_p], ignore_index=True)
-                    save_data(st.session_state.players_df)
-                    st.session_state.auto_selected.add(c_nom.strip())
-                    st.session_state.unknown_names.pop(0)
-                    st.rerun()
-
-    st.subheader("Sélection des présents")
-    df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
-    counter_placeholder = st.empty()
-    selected_names = []
-    
-    for i in range(0, len(df_sorted), 3):
-        cols = st.columns(3)
-        for c_idx in range(3):
-            if i + c_idx < len(df_sorted):
-                name = df_sorted.iloc[i + c_idx]["Nom du Joueur"]
-                with cols[c_idx]:
-                    if st.checkbox(name, key=f"chk_{name}_{i+c_idx}", value=(name in st.session_state.auto_selected)):
-                        selected_names.append(name)
-                        st.session_state.auto_selected.add(name)
-                    else:
-                        st.session_state.auto_selected.discard(name)
-                
-    selected_players = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)].copy()
-    nb_regulars = len(selected_players)
-    current_jokers = st.session_state.get('session_jokers', [])
-    nb_jokers = len(current_jokers)
-    total_effective = nb_regulars + nb_jokers
-
-    col_jk_btn1, col_jk_btn2 = st.columns([3, 1])
-    with col_jk_btn1:
-        if nb_regulars < 10:
-            manquants = 10 - nb_regulars
-            btn_lbl = f"🃏 Ajouter / Modifier les Jokers ({nb_jokers}/{manquants} défini(s))"
-            if st.button(btn_lbl, type="secondary"):
-                st.session_state.jokers_needed_count = manquants
-                st.session_state.show_jokers_modal = True
-                st.rerun()
-    with col_jk_btn2:
-        if nb_jokers > 0:
-            if st.button("❌ Réinitialiser les Jokers"):
-                st.session_state.session_jokers = []
-                st.rerun()
-
-    if total_effective == 10:
-        if nb_jokers > 0:
-            counter_placeholder.success(f"✅ 10 joueurs prêts ! ({nb_regulars} titulaires + {nb_jokers} Jokers)")
-        else:
-            counter_placeholder.success("✅ 10 joueurs sélectionnés !")
-    elif total_effective > 10:
-        counter_placeholder.error(f"⚠️ Trop de joueurs ({total_effective}/10). Décochez des titulaires ou ajustez les Jokers !")
-    else:
-        counter_placeholder.info(f"🏃 Joueurs actuels : {total_effective} / 10 ({nb_regulars} titulaires + {nb_jokers} Jokers)")
-        
-    st.write("---")
-    
-    jokers_names = [j['Nom du Joueur'] for j in current_jokers]
-    all_active_names = sorted(selected_names + jokers_names)
-
-    if len(all_active_names) > 0:
-        st.markdown("### ⚙️ Restrictions et Affinités Multiples")
-        
-        col_res1, col_res2 = st.columns(2)
-        with col_res1:
-            st.markdown("**⛔ Joueurs à NE PAS mettre ensemble (Séparation)**")
-            separated_group = st.multiselect(
-                "Sélectionnez plusieurs joueurs (ils ne pourront pas tous être dans la même équipe) :",
-                options=all_active_names,
-                default=[],
-                help="Empêche que tous ces joueurs se retrouvent réunis dans la même équipe."
-            )
-        
-        with col_res2:
-            st.markdown("**🤝 Joueurs à METTRE OBLIGATOIREMENT ensemble**")
-            paired_group = st.multiselect(
-                "Sélectionnez un groupe de joueurs (2 à 5) obligatoirement réunis :",
-                options=all_active_names,
-                default=[],
-                help="Force ces joueurs à faire partie intégrante de la même équipe."
-            )
-
-        conflict = False
-        if len(paired_group) > 5:
-            st.error("⚠️ Impossible d'associer plus de 5 joueurs dans une équipe de futsal à 5 !")
-            conflict = True
-        
-        # Conflit si un groupe associé est aussi inclus en totalité dans le groupe à séparer
-        if len(paired_group) >= 2 and set(paired_group).issubset(set(separated_group)):
-            st.error("⚠️ Incohérence : vous forcez un groupe de joueurs à jouer ensemble tout en leur interdisant d'être réunis !")
-            conflict = True
-
-        st.write("")
-        
-        if st.button("⚡ Générer l'Équilibrage Parfait", type="primary", disabled=conflict):
-            if total_effective < 10:
-                st.session_state.jokers_needed_count = 10 - nb_regulars
-                st.session_state.show_jokers_modal = True
-                st.rerun()
-            elif total_effective == 10:
-                selected_players['is_joker'] = False
-                if nb_jokers > 0:
-                    df_jokers = pd.DataFrame(current_jokers)
-                    full_group_df = pd.concat([selected_players, df_jokers], ignore_index=True)
-                else:
-                    full_group_df = selected_players
-                
-                players_list = full_group_df.to_dict(orient='records')
-                best_diff = float('inf')
-                best_team1, best_team2 = None, None
-                valid_combo_found = False
-                
-                for combo in itertools.combinations(players_list, 5):
-                    t1 = list(combo)
-                    t2 = [p for p in players_list if p not in t1]
-                    names_t1 = set(p['Nom du Joueur'] for p in t1)
-                    names_t2 = set(p['Nom du Joueur'] for p in t2)
-                    
-                    # Contrainte Séparation multiple : les joueurs sélectionnés ne peuvent pas être TOUS dans la même équipe
-                    if len(separated_group) >= 2:
-                        set_sep = set(separated_group)
-                        if set_sep.issubset(names_t1) or set_sep.issubset(names_t2):
-                            continue
-                    
-                    # Contrainte Association multiple : les joueurs sélectionnés doivent être TOUS dans la même équipe
-                    if len(paired_group) >= 2:
-                        set_pair = set(paired_group)
-                        if not (set_pair.issubset(names_t1) or set_pair.issubset(names_t2)):
-                            continue
-
-                    valid_combo_found = True
-                    df_t1, df_t2 = pd.DataFrame(t1), pd.DataFrame(t2)
-                    t1_att, t1_def = df_t1['Attaque'].apply(text_to_score).sum(), df_t1['Défense'].apply(text_to_score).sum()
-                    t1_gk, t1_col  = df_t1['Gardien'].apply(text_to_score).sum(), df_t1['Collectif'].apply(text_to_score).sum()
-                    t2_att, t2_def = df_t2['Attaque'].apply(text_to_score).sum(), df_t2['Défense'].apply(text_to_score).sum()
-                    t2_gk, t2_col  = df_t2['Gardien'].apply(text_to_score).sum(), df_t2['Collectif'].apply(text_to_score).sum()
-                    total_diff = abs(t1_att - t2_att) + abs(t1_def - t2_def) + abs(t1_gk - t2_gk) + abs(t1_col - t2_col)
-                    if total_diff < best_diff:
-                        best_diff, best_team1, best_team2 = total_diff, df_t1, df_t2
-                
-                if valid_combo_found:
-                    st.session_state.last_team1 = best_team1
-                    st.session_state.last_team2 = best_team2
-                    st.session_state.open_teams_popup = True
-                    st.rerun()
-                else:
-                    st.error("Aucune combinaison ne peut satisfaire à la fois l'équilibre et les contraintes multiples imposées.")
-
-    if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
-        st.write("---")
-        st.markdown("### 📊 Dernières équipes générées")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**🔵 Équipe 1**")
-            t1_display = st.session_state.last_team1.copy()
-            t1_display["Note Globale"] = t1_display.apply(calculate_global_score, axis=1)
-            st.dataframe(t1_display[[c for c in ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"] if c in t1_display.columns]], hide_index=True)
-        with c2:
-            st.markdown("**🔴 Équipe 2**")
-            t2_display = st.session_state.last_team2.copy()
-            t2_display["Note Globale"] = t2_display.apply(calculate_global_score, axis=1)
-            st.dataframe(t2_display[[c for c in ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"] if c in t2_display.columns]], hide_index=True)
-
-# ----------------- ONGLET 2 : BDD JOUEURS -----------------
-with tab2:
-    st.header("Gestion de la base des joueurs")
-    col_add, col_del = st.columns(2)
-    with col_add:
-        with st.expander("➕ Ajouter un nouveau joueur"):
-            with st.form("form_add"):
-                name = st.text_input("Nom / Pseudo du joueur")
-                att_l = st.selectbox("Attaque (1-10)", options=NUMERIC_OPTIONS, index=4)
-                def_l = st.selectbox("Défense (1-10)", options=NUMERIC_OPTIONS, index=4)
-                gk_l  = st.selectbox("Gardien (1-10)", options=NUMERIC_OPTIONS, index=4)
-                col_l = st.selectbox("Collectif (1-10)", options=NUMERIC_OPTIONS, index=4)
-                surnames = st.text_input("Surnoms séparés par des virgules")
-                if st.form_submit_button("Ajouter le joueur"):
-                    if name.strip() and name.strip() not in st.session_state.players_df["Nom du Joueur"].values:
-                        new_p = pd.DataFrame({"Nom du Joueur": [name.strip()], "Attaque": [att_l], "Défense": [def_l], "Gardien": [gk_l], "Collectif": [col_l], "Surnoms": [surnames.strip()]})
-                        st.session_state.players_df = pd.concat([st.session_state.players_df, new_p], ignore_index=True)
-                        save_data(st.session_state.players_df)
-                        st.success(f"✅ {name.strip()} ajouté !")
-                        st.rerun()
-
-    with col_del:
-        with st.expander("🗑️ Supprimer un joueur de la BDD"):
-            all_p = sorted(list(st.session_state.players_df["Nom du Joueur"].values))
-            if all_p:
-                p_del = st.selectbox("Sélectionner :", options=all_p)
-                if st.button("🗑️ Supprimer définitivement"):
-                    st.session_state.players_df = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] != p_del].reset_index(drop=True)
-                    save_data(st.session_state.players_df)
-                    st.session_state.auto_selected.discard(p_del)
-                    st.success(f"✅ {p_del} supprimé !")
-                    st.rerun()
-                    
-    st.write("---")
-    st.subheader("📝 Modification et édition directe de l'effectif")
-    col_save, col_restore = st.columns([2, 2])
-    with col_save: 
-        btn_save_top = st.button("💾 Enregistrer les modifications", type="primary", key="save_btn_top")
-    with col_restore:
-        if os.path.exists(BACKUP_FILE):
-            if st.button("⏪ Restaurer le dernier backup"):
-                shutil.copyfile(BACKUP_FILE, DATA_FILE)
-                st.success("✅ Base restaurée !")
-                st.rerun()
-    
-    df_to_edit = st.session_state.players_df.copy()
-    for c in ["Note Globale", "is_joker"]:
-        if c in df_to_edit.columns: 
-            df_to_edit = df_to_edit.drop(columns=[c])
-    for c in ["Attaque", "Défense", "Gardien", "Collectif"]:
-        df_to_edit[c] = df_to_edit[c].apply(text_to_score)
-        
-    edited_players = st.data_editor(
-        df_to_edit[["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]],
-        column_config={
-            "Nom du Joueur": st.column_config.TextColumn("Nom du Joueur", required=True),
-            "Attaque": st.column_config.SelectboxColumn("Attaque", options=NUMERIC_OPTIONS, required=True),
-            "Défense": st.column_config.SelectboxColumn("Défense", options=NUMERIC_OPTIONS, required=True),
-            "Gardien": st.column_config.SelectboxColumn("Gardien", options=NUMERIC_OPTIONS, required=True),
-            "Collectif": st.column_config.SelectboxColumn("Collectif", options=NUMERIC_OPTIONS, required=True),
-            "Surnoms": st.column_config.TextColumn("Surnoms (virgules)"),
-        }, hide_index=True, use_container_width=True
-    )
-
-    if btn_save_top or st.button("💾 Enregistrer les modifications", type="primary", key="save_btn_bottom"):
-        st.session_state.players_df = edited_players
-        save_data(edited_players)
-        st.success("✅ Fichier Excel sauvegardé avec backup !")
-        st.rerun()
-
-# ----------------- ONGLET 3 : BASE JOKERS -----------------
-with tab3:
-    st.header("Gestion de la Base des Jokers")
-    st.caption("Cette base répertorie les joueurs externes récurrents pour faciliter leur sélection le jour du match.")
-    
-    col_add_j, col_del_j = st.columns(2)
-    with col_add_j:
-        with st.expander("➕ Ajouter un Joker à la base"):
-            with st.form("form_add_joker"):
-                j_name = st.text_input("Nom / Prénom du Joker")
-                j_att = st.selectbox("Attaque (1-10)", options=NUMERIC_OPTIONS, index=4, key="jadd_att")
-                j_def = st.selectbox("Défense (1-10)", options=NUMERIC_OPTIONS, index=4, key="jadd_def")
-                j_gk  = st.selectbox("Gardien (1-10)", options=NUMERIC_OPTIONS, index=4, key="jadd_gk")
-                j_col = st.selectbox("Collectif (1-10)", options=NUMERIC_OPTIONS, index=4, key="jadd_col")
-                j_surnames = st.text_input("Surnoms éventuels", key="jadd_surnames")
-                if st.form_submit_button("Ajouter le Joker"):
-                    current_names = st.session_state.jokers_df["Nom du Joueur"].values if "Nom du Joueur" in st.session_state.jokers_df.columns else []
-                    if j_name.strip() and j_name.strip() not in current_names:
-                        new_j = pd.DataFrame({"Nom du Joueur": [j_name.strip()], "Attaque": [j_att], "Défense": [j_def], "Gardien": [j_gk], "Collectif": [j_col], "Surnoms": [j_surnames.strip()]})
-                        st.session_state.jokers_df = pd.concat([st.session_state.jokers_df, new_j], ignore_index=True)
-                        save_jokers(st.session_state.jokers_df)
-                        st.success(f"✅ Joker {j_name.strip()} enregistré !")
-                        st.rerun()
-    with col_del_j:
-        with st.expander("🗑️ Supprimer un Joker"):
-            all_j = sorted(list(st.session_state.jokers_df["Nom du Joueur"].values)) if "Nom du Joueur" in st.session_state.jokers_df.columns else []
-            if all_j:
-                j_to_del = st.selectbox("Sélectionner :", options=all_j, key="jdel_select")
-                if st.button("🗑️ Supprimer ce Joker"):
-                    st.session_state.jokers_df = st.session_state.jokers_df[st.session_state.jokers_df["Nom du Joueur"] != j_to_del].reset_index(drop=True)
-                    save_jokers(st.session_state.jokers_df)
-                    st.success(f"✅ Joker {j_to_del} supprimé !")
-                    st.rerun()
-
-    st.write("---")
-    st.subheader("📝 Édition directe de la table des Jokers")
-    col_j_save, col_j_restore = st.columns([2, 2])
-    with col_j_save: 
-        btn_save_j_top = st.button("💾 Enregistrer la base des Jokers", type="primary", key="save_j_top")
-    with col_j_restore:
-        if os.path.exists(JOKERS_BACKUP_FILE):
-            if st.button("⏪ Restaurer le backup Jokers"):
-                shutil.copyfile(JOKERS_BACKUP_FILE, JOKERS_FILE)
-                st.success("✅ Base des Jokers restaurée !")
-                st.rerun()
-
-    df_j_edit = st.session_state.jokers_df.copy()
-    for c in ["Note Globale", "is_joker"]:
-        if c in df_j_edit.columns: 
-            df_j_edit = df_j_edit.drop(columns=[c])
-    for c in ["Attaque", "Défense", "Gardien", "Collectif"]:
-        if c in df_j_edit.columns:
-            df_j_edit[c] = df_j_edit[c].apply(text_to_score)
-
-    display_cols_j = [c for c in ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"] if c in df_j_edit.columns]
-    edited_jokers = st.data_editor(
-        df_j_edit[display_cols_j],
-        column_config={
-            "Nom du Joueur": st.column_config.TextColumn("Nom du Joueur", required=True),
-            "Attaque": st.column_config.SelectboxColumn("Attaque", options=NUMERIC_OPTIONS, required=True),
-            "Défense": st.column_config.SelectboxColumn("Défense", options=NUMERIC_OPTIONS, required=True),
-            "Gardien": st.column_config.SelectboxColumn("Gardien", options=NUMERIC_OPTIONS, required=True),
-            "Collectif": st.column_config.SelectboxColumn("Collectif", options=NUMERIC_OPTIONS, required=True),
-            "Surnoms": st.column_config.TextColumn("Surnoms"),
-        }, hide_index=True, use_container_width=True, key="data_editor_jokers"
-    )
-
-    st.markdown("##### 📊 Moyennes des Jokers")
-    view_j_df = edited_jokers.copy()
-    view_j_df["Note Globale"] = view_j_df.apply(calculate_global_score, axis=1)
-    st.dataframe(view_j_df[["Nom du Joueur", "Note Globale"]], hide_index=True, use_container_width=True)
-
-    if btn_save_j_top or st.button("💾 Enregistrer la base des Jokers", type="primary", key="save_j_bottom"):
-        st.session_state.jokers_df = edited_jokers
-        save_jokers(edited_jokers)
-        st.success("✅ Base Jokers sauvegardée !")
-        st.rerun()
-
-    st.write("---")
-    j_buf = io.BytesIO()
-    st.session_state.jokers_df.to_excel(j_buf, index=False)
-    j_buf.seek(0)
-    st.download_button("💾 Télécharger database_jokers.xlsx", data=j_buf, file_name="database_jokers.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    alias_
