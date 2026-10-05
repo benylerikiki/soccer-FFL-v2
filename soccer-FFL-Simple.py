@@ -220,7 +220,7 @@ def save_data(df):
         try:
             shutil.copyfile(DATA_FILE, BACKUP_FILE)
         except Exception as e:
-            st.warning(f"⚠️️ Impossible de créer le backup : {e}")
+            st.warning(f"⚠️ Impossible de créer le backup : {e}")
 
     clean_df = df.copy()
     if "Note Globale" in clean_df.columns:
@@ -437,7 +437,57 @@ def show_teams_popup(t1, t2):
     if st.button("Fermer"): 
         st.rerun()
 
-@st.dialog("🃏 Saisie des Joueurs Jokers", width="medium")
+def compute_teams(players_list, j1, j2, force_t1_names, force_t2_names):
+    """Calcule le meilleur équilibrage en respectant les contraintes d'équipe 1 et 2."""
+    best_diff = float('inf')
+    best_team1, best_team2 = None, None
+    valid_combo_found = False
+    
+    set_force_t1 = set(force_t1_names)
+    set_force_t2 = set(force_t2_names)
+    
+    for combo in itertools.combinations(players_list, 5):
+        t1 = list(combo)
+        t2 = [p for p in players_list if p not in t1]
+        
+        names_t1 = set(p['Nom du Joueur'] for p in t1)
+        names_t2 = set(p['Nom du Joueur'] for p in t2)
+        
+        # Vérification des groupes imposés
+        if not set_force_t1.issubset(names_t1):
+            continue
+        if not set_force_t2.issubset(names_t2):
+            continue
+
+        # Vérification de l'interdiction de jouer ensemble
+        if j1 != "Aucune restriction" and j2 != "Aucun":
+            if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
+                continue
+        
+        valid_combo_found = True
+        df_t1 = pd.DataFrame(t1)
+        df_t2 = pd.DataFrame(t2)
+        
+        t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
+        t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
+        t1_gk_sum  = df_t1['Gardien'].apply(text_to_score).sum()
+        t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
+        
+        t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
+        t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
+        t2_gk_sum  = df_t2['Gardien'].apply(text_to_score).sum()
+        t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
+        
+        total_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_gk_sum - t2_gk_sum) + abs(t1_col_sum - t2_col_sum)
+        
+        if total_diff < best_diff:
+            best_diff = total_diff
+            best_team1 = df_t1
+            best_team2 = df_t2
+
+    return valid_combo_found, best_team1, best_team2
+
+@st.dialog("🃏 Saisie des Joueurs Jokers", width="large")
 def add_jokers_dialog():
     nb_missing = st.session_state.jokers_info['nb_missing']
     selected_players_df = st.session_state.jokers_info['selected_players'].copy()
@@ -445,83 +495,91 @@ def add_jokers_dialog():
     
     j1 = st.session_state.jokers_info['j1']
     j2 = st.session_state.jokers_info['j2']
+    force_t1 = st.session_state.jokers_info['force_t1']
+    force_t2 = st.session_state.jokers_info['force_t2']
 
-    st.write(f"Il manque **{nb_missing}** joueur(s) pour atteindre 10. Renseignez leurs prénoms et notes :")
+    st.write(f"Il manque **{nb_missing}** joueur(s) pour atteindre 10.")
+    st.info("💡 Vous pouvez piocher des Jokers déjà enregistrés dans la base ou en saisir de nouveaux à la volée.")
+
+    jokers_db = st.session_state.jokers_db
+    has_db_jokers = not jokers_db.empty and "Nom Joker" in jokers_db.columns
+
+    db_joker_names = jokers_db["Nom Joker"].dropna().unique().tolist() if has_db_jokers else []
+
+    jokers_rows = []
     
-    existing_jokers = st.session_state.jokers_db
-    jokers_input = []
-    
-    with st.form("form_jokers"):
+    with st.form("form_jokers_modal"):
         for k in range(nb_missing):
-            st.markdown(f"**Joker {k+1}**")
-            col_j_name, col_j_score = st.columns([2, 1])
-            with col_j_name:
-                j_name = st.text_input(f"Prénom du Joker {k+1}", value=f"Joker {k+1}", key=f"j_name_{k}")
-            with col_j_score:
-                j_score = st.number_input("Note (1 à 10)", min_value=1, max_value=10, value=5, key=f"j_score_{k}")
-            jokers_input.append((j_name.strip(), j_score))
-        
-        submit_jokers = st.form_submit_button("⚡ Valider et Générer avec les Jokers", type="primary")
-        
-    if submit_jokers:
-        jokers_rows = []
-        for j_name, j_score in jokers_input:
-            num_score = text_to_score(j_score)
-            clean_name = f"Joker {j_name}" if not j_name.startswith("Joker") else j_name
-            jokers_rows.append({
-                "Nom du Joueur": clean_name,
-                "Attaque": num_score,
-                "Défense": num_score,
-                "Gardien": num_score,
-                "Collectif": num_score,
-                "Surnoms": "",
-                "is_joker": True
-            })
+            st.markdown(f"#### 🃏 Place n°{k+1}")
             
+            source_choice = st.radio(
+                f"Source pour le Joker {k+1} :",
+                ["Sélectionner depuis la BDD Jokers", "Saisir un nouveau Joker"] if has_db_jokers else ["Saisir un nouveau Joker"],
+                key=f"jk_source_{k}",
+                horizontal=True
+            )
+            
+            if source_choice == "Sélectionner depuis la BDD Jokers":
+                col_sel, col_info = st.columns([2, 1])
+                with col_sel:
+                    chosen_j_name = st.selectbox(f"Choisir le Joker {k+1}", options=db_joker_names, key=f"sel_jk_db_{k}")
+                
+                row_match = jokers_db[jokers_db["Nom Joker"] == chosen_j_name].iloc[0]
+                att_val = text_to_score(row_match.get("Attaque", 5))
+                def_val = text_to_score(row_match.get("Défense", 5))
+                gk_val = text_to_score(row_match.get("Gardien", 5))
+                col_val = text_to_score(row_match.get("Collectif", 5))
+                
+                with col_info:
+                    st.caption(f"Notes : Att {att_val} | Déf {def_val} | Gk {gk_val} | Col {col_val}")
+
+                jokers_rows.append({
+                    "Nom du Joueur": f"Joker {chosen_j_name}" if not chosen_j_name.startswith("Joker") else chosen_j_name,
+                    "Attaque": att_val,
+                    "Défense": def_val,
+                    "Gardien": gk_val,
+                    "Collectif": col_val,
+                    "Surnoms": "",
+                    "is_joker": True
+                })
+            else:
+                col_name, col_score = st.columns([2, 1])
+                with col_name:
+                    custom_name = st.text_input(f"Prénom du Joker {k+1}", value=f"Joker {k+1}", key=f"custom_name_{k}")
+                with col_score:
+                    custom_score = st.number_input(f"Note Globale (1-10)", min_value=1, max_value=10, value=5, key=f"custom_score_{k}")
+
+                score_val = text_to_score(custom_score)
+                clean_name = custom_name.strip()
+                final_name = f"Joker {clean_name}" if not clean_name.startswith("Joker") else clean_name
+
+                jokers_rows.append({
+                    "Nom du Joueur": final_name,
+                    "Attaque": score_val,
+                    "Défense": score_val,
+                    "Gardien": score_val,
+                    "Collectif": score_val,
+                    "Surnoms": "",
+                    "is_joker": True
+                })
+            st.write("---")
+
+        submit_jokers = st.form_submit_button("⚡ Valider et Générer les Équipes", type="primary")
+
+    if submit_jokers:
         full_group_df = pd.concat([selected_players_df, pd.DataFrame(jokers_rows)], ignore_index=True)
         players_list = full_group_df.to_dict(orient='records')
-        best_diff = float('inf')
-        best_team1, best_team2 = None, None
-        valid_combo_found = False
         
-        for combo in itertools.combinations(players_list, 5):
-            t1 = list(combo)
-            t2 = [p for p in players_list if p not in t1]
-            
-            names_t1 = [p['Nom du Joueur'] for p in t1]
-            names_t2 = [p['Nom du Joueur'] for p in t2]
-            
-            if j1 != "Aucune restriction" and j2 != "Aucun":
-                if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
-                    continue
-            
-            valid_combo_found = True
-            df_t1 = pd.DataFrame(t1)
-            df_t2 = pd.DataFrame(t2)
-            
-            t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
-            t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
-            t1_gk_sum  = df_t1['Gardien'].apply(text_to_score).sum()
-            t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
-            
-            t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
-            t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
-            t2_gk_sum  = df_t2['Gardien'].apply(text_to_score).sum()
-            t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
-            
-            total_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_gk_sum - t2_gk_sum) + abs(t1_col_sum - t2_col_sum)
-            
-            if total_diff < best_diff:
-                best_diff = total_diff
-                best_team1 = df_t1
-                best_team2 = df_t2
-                
-        if valid_combo_found:
+        valid_combo, best_team1, best_team2 = compute_teams(players_list, j1, j2, force_t1, force_t2)
+
+        if valid_combo:
             st.session_state.last_team1 = best_team1
             st.session_state.last_team2 = best_team2
             st.session_state.open_teams_popup = True
             st.session_state.show_jokers_modal = False
             st.rerun()
+        else:
+            st.error("Aucune combinaison valide trouvée avec l'ensemble des contraintes imposées.")
 
 # --- EN-TÊTE PRINCIPAL ---
 col_logo, col_title, col_home = st.columns([1, 5, 1])
@@ -725,10 +783,33 @@ with tab1:
     st.write("---")
     
     if 0 < nb_selected <= 10:
-        st.markdown("### ⛔ Restriction d'affinité (Optionnel)")
-        j1 = st.selectbox("Sélectionner un joueur...", options=["Aucune restriction"] + sorted(selected_names), index=0)
-        remaining_options = [n for n in selected_names if n != j1] if j1 != "Aucune restriction" else []
-        j2 = st.selectbox("... à ne surtout pas faire jouer avec :", options=["Aucun"] + sorted(remaining_options), index=0) if j1 != "Aucune restriction" else "Aucun"
+        st.markdown("### 🤝 Forcer des Joueurs dans les Équipes (Jusqu'à 5 par équipe)")
+        col_force_t1, col_force_t2 = st.columns(2)
+        
+        with col_force_t1:
+            force_t1 = st.multiselect(
+                "🔵 Forcer ensemble dans l'ÉQUIPE 1 (max 5) :",
+                options=sorted(selected_names),
+                max_selections=5,
+                key="force_t1_select"
+            )
+        with col_force_t2:
+            remaining_for_t2 = [n for n in sorted(selected_names) if n not in force_t1]
+            force_t2 = st.multiselect(
+                "🔴 Forcer ensemble dans l'ÉQUIPE 2 (max 5) :",
+                options=remaining_for_t2,
+                max_selections=5,
+                key="force_t2_select"
+            )
+
+        st.markdown("### ⛔ Restriction d'opposition (Optionnel)")
+        col_j1, col_j2 = st.columns(2)
+        with col_j1:
+            j1 = st.selectbox("Sélectionner un joueur...", options=["Aucune restriction"] + sorted(selected_names), index=0)
+        with col_j2:
+            remaining_options = [n for n in selected_names if n != j1] if j1 != "Aucune restriction" else []
+            j2 = st.selectbox("... à ne surtout pas faire jouer avec :", options=["Aucun"] + sorted(remaining_options), index=0) if j1 != "Aucune restriction" else "Aucun"
+        
         st.write("")
         
         if st.button("⚡ Générer l'Équilibrage Parfait", type="primary"):
@@ -737,51 +818,19 @@ with tab1:
                     'nb_missing': 10 - nb_selected,
                     'selected_players': selected_players,
                     'j1': j1,
-                    'j2': j2
+                    'j2': j2,
+                    'force_t1': force_t1,
+                    'force_t2': force_t2
                 }
                 st.session_state.show_jokers_modal = True
                 st.rerun()
             else:
                 selected_players['is_joker'] = False
                 players_list = selected_players.to_dict(orient='records')
-                best_diff = float('inf')
-                best_team1, best_team2 = None, None
-                valid_combo_found = False
+                valid_combo, best_team1, best_team2 = compute_teams(players_list, j1, j2, force_t1, force_t2)
                 
-                for combo in itertools.combinations(players_list, 5):
-                    t1 = list(combo)
-                    t2 = [p for p in players_list if p not in t1]
-                    
-                    names_t1 = [p['Nom du Joueur'] for p in t1]
-                    names_t2 = [p['Nom du Joueur'] for p in t2]
-                    
-                    if j1 != "Aucune restriction" and j2 != "Aucun":
-                        if (j1 in names_t1 and j2 in names_t1) or (j1 in names_t2 and j2 in names_t2):
-                            continue
-                    
-                    valid_combo_found = True
-                    df_t1 = pd.DataFrame(t1)
-                    df_t2 = pd.DataFrame(t2)
-                    
-                    t1_att_sum = df_t1['Attaque'].apply(text_to_score).sum()
-                    t1_def_sum = df_t1['Défense'].apply(text_to_score).sum()
-                    t1_gk_sum  = df_t1['Gardien'].apply(text_to_score).sum()
-                    t1_col_sum = df_t1['Collectif'].apply(text_to_score).sum()
-                    
-                    t2_att_sum = df_t2['Attaque'].apply(text_to_score).sum()
-                    t2_def_sum = df_t2['Défense'].apply(text_to_score).sum()
-                    t2_gk_sum  = df_t2['Gardien'].apply(text_to_score).sum()
-                    t2_col_sum = df_t2['Collectif'].apply(text_to_score).sum()
-                    
-                    total_diff = abs(t1_att_sum - t2_att_sum) + abs(t1_def_sum - t2_def_sum) + abs(t1_gk_sum - t2_gk_sum) + abs(t1_col_sum - t2_col_sum)
-                    
-                    if total_diff < best_diff:
-                        best_diff = total_diff
-                        best_team1 = df_t1
-                        best_team2 = df_t2
-                
-                if not valid_combo_found:
-                    st.error("Impossible de générer les équipes avec cette contrainte.")
+                if not valid_combo:
+                    st.error("Impossible de générer les équipes respectant l'ensemble de vos contraintes.")
                 else:
                     st.session_state.last_team1 = best_team1
                     st.session_state.last_team2 = best_team2
