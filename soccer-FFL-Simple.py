@@ -223,7 +223,7 @@ def save_data(df):
         try:
             shutil.copyfile(DATA_FILE, BACKUP_FILE)
         except Exception as e:
-            st.warning(f"⚠️️ Impossible de créer le backup : {e}")
+            st.warning(f"⚠️ Impossible de créer le backup : {e}")
 
     clean_df = df.copy()
     if "Note Globale" in clean_df.columns:
@@ -518,7 +518,7 @@ with tab1:
         convoc_text = st.text_area(
             "Colle le texte brut de ta convocation ici :", 
             height=150, 
-            placeholder="Présents :\nNico P (1), Cédric (2), Invité mystère (3)..."
+            placeholder="Présents :\nNico P (1), Cédric (2), Natan (3), Mex (4) beny (5) Gaby (6)..."
         )
         
         if st.button("🔍 Extraire et Valider les Joueurs"):
@@ -529,11 +529,15 @@ with tab1:
                 stop_pattern = r"\n\s*(jokers?|absents?|infirmerie|en attente|à confirmer|a confirmer)\b"
                 target_text = re.split(stop_pattern, target_text, flags=re.IGNORECASE)[0]
 
+                # Ajoute une virgule si une parenthèse fermante est suivie d'une lettre (oubli de virgule)
+                target_text = re.sub(r"\)\s*(?=[a-zA-ZÀ-ÿ])", "), ", target_text)
+
+                # Découpage sur virgules, points-virgules ou retours à la ligne
                 raw_segments = re.split(r"[\n,;]+", target_text)
                 cleaned_names = []
                 for seg in raw_segments:
-                    s = re.sub(r"\(\s*\d+\s*\)", "", seg)
-                    s = re.sub(r"^\s*[\d\.\-\*\•\:]+\s*", "", s)
+                    s = re.sub(r"\(\s*\d+\s*\)", "", seg)       # Retire (3), ( 4 ), etc.
+                    s = re.sub(r"^\s*[\d\.\-\*\•\:]+\s*", "", s) # Retire puces et chiffres de tête
                     s = s.strip()
                     if s:
                         cleaned_names.append(s)
@@ -939,7 +943,7 @@ with tab2:
                             st.error("Le nom est vide ou existe déjà.")
 
         with col_del:
-            with st.expander("🗑️ Supprimer un joueur de la BDD"):
+            with st.expander("🗑️️ Supprimer un joueur de la BDD"):
                 all_players = sorted(list(st.session_state.players_df["Nom du Joueur"].values))
                 if all_players:
                     player_to_delete = st.selectbox("Sélectionner le joueur à supprimer :", options=all_players)
