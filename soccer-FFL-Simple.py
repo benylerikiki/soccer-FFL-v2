@@ -223,7 +223,7 @@ def save_data(df):
         try:
             shutil.copyfile(DATA_FILE, BACKUP_FILE)
         except Exception as e:
-            st.warning(f"⚠️ Impossible de créer le backup : {e}")
+            st.warning(f"⚠️️ Impossible de créer le backup : {e}")
 
     clean_df = df.copy()
     if "Note Globale" in clean_df.columns:
@@ -514,7 +514,7 @@ tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion des Bases"])
 # ⚖️ TAB 1 : ÉQUILIBRAGE DU JOUR
 # ==========================================
 with tab1:
-   with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=True):
+    with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=False):
         convoc_text = st.text_area(
             "Colle le texte brut de ta convocation ici :", 
             height=150, 
@@ -523,34 +523,26 @@ with tab1:
         
         if st.button("🔍 Extraire et Valider les Joueurs"):
             if convoc_text.strip():
-                # 1. Isoler la section des présents si un mot-clé existe, sinon prendre tout le texte
                 match_presents = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
                 target_text = match_presents.group(1) if match_presents else convoc_text
 
-                # 2. Stopper la lecture si une section secondaire commence
                 stop_pattern = r"\n\s*(jokers?|absents?|infirmerie|en attente|à confirmer|a confirmer)\b"
                 target_text = re.split(stop_pattern, target_text, flags=re.IGNORECASE)[0]
 
-                # 3. Découpage strict entre virgules, points-virgules ou sauts de ligne
                 raw_segments = re.split(r"[\n,;]+", target_text)
-                
                 cleaned_names = []
                 for seg in raw_segments:
-                    # Supprime les numérotations entre parenthèses : (1), ( 2 ), (10)
                     s = re.sub(r"\(\s*\d+\s*\)", "", seg)
-                    # Supprime les puces et numérotations de début : "1.", "1 -", "•", "-"
                     s = re.sub(r"^\s*[\d\.\-\*\•\:]+\s*", "", s)
                     s = s.strip()
                     if s:
                         cleaned_names.append(s)
 
-                # 4. Construction de la table de correspondance (noms exacts et surnoms)
                 df_db = st.session_state.players_df
                 alias_map = {}
                 for _, row in df_db.iterrows():
                     real_name = str(row["Nom du Joueur"]).strip()
                     alias_map.setdefault(real_name.lower(), []).append(real_name)
-                    
                     surnoms = [sn.strip().lower() for sn in str(row.get("Surnoms", "")).split(",") if sn.strip()]
                     for sn in surnoms:
                         if real_name not in alias_map.setdefault(sn, []):
@@ -560,7 +552,6 @@ with tab1:
                 unknown_names = []
                 ambiguous_matches = []
 
-                # 5. Rapprochement direct de chaque bloc extrait
                 for candidate in cleaned_names:
                     key = candidate.lower()
                     if key in alias_map:
@@ -573,7 +564,6 @@ with tab1:
                                 "candidates": matches
                             })
                     else:
-                        # Si aucun match direct, toute la chaîne entre virgules est retenue comme inconnue
                         unknown_names.append(candidate)
 
                 st.session_state.auto_selected = found_players
@@ -584,7 +574,6 @@ with tab1:
                     st.success(f"✅ {len(found_players)} joueur(s) reconnu(s) : {', '.join(found_players)}")
                 if unknown_names:
                     st.warning(f"⚠️ {len(unknown_names)} joueur(s) non reconnu(s) : {', '.join(unknown_names)}")
-                
                 st.rerun()
             else:
                 st.error("Le texte est vide.")
@@ -708,7 +697,6 @@ with tab1:
     # --- 2. AJOUT DES JOKERS (AVANT LES RESTRICTIONS) ---
     st.subheader(f"2. Jokers / Invités du Jour ({nb_jokers} ajouté{'s' if nb_jokers > 1 else ''})")
     
-    # Affichage des Jokers actuellement ajoutés
     if st.session_state.match_jokers_list:
         for idx_jk, jk in enumerate(st.session_state.match_jokers_list):
             c_txt, c_del = st.columns([5, 1])
@@ -719,7 +707,6 @@ with tab1:
                     st.session_state.match_jokers_list.pop(idx_jk)
                     st.rerun()
 
-    # Formulaire d'ajout si moins de 10
     if total_players_count < 10:
         places_needed = 10 - total_players_count
         st.write(f"👉 Il manque encore **{places_needed}** joueur(s) pour compléter le match.")
@@ -737,7 +724,6 @@ with tab1:
             
             if mode_choice == "Sélectionner depuis la BDD Jokers":
                 db_joker_names = sorted(jokers_db["Nom Joker"].dropna().unique().tolist())
-                # Exclure les jokers déjà ajoutés
                 current_jk_names = [j["Nom du Joueur"] for j in st.session_state.match_jokers_list]
                 available_db_names = [n for n in db_joker_names if f"Joker {n}" not in current_jk_names and n not in current_jk_names]
                 
@@ -808,7 +794,6 @@ with tab1:
     elif total_players_count > 10:
         st.error(f"⚠️ Trop de joueurs au total ({total_players_count}/10). Retirez des Jokers ou décochez des titulaires.")
 
-    # Liste consolidée de tous les joueurs pour le match (titulaires + jokers)
     regular_players_df = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"].isin(selected_names)].copy()
     regular_players_df['is_joker'] = False
     
@@ -817,7 +802,7 @@ with tab1:
 
     st.write("---")
 
-    # --- 3. RESTRICTIONS D'AFFINITÉ & OPPOSITION (SUR TOUS LES JOUEURS PRÉSENTS) ---
+    # --- 3. RESTRICTIONS D'AFFINITÉ & OPPOSITION ---
     st.subheader(f"3. Affinités et Oppositions ({len(all_match_names)} / 10 joueurs retenus)")
 
     if total_players_count == 10:
@@ -867,7 +852,6 @@ with tab1:
                 st.session_state.open_teams_popup = True
                 st.rerun()
 
-    # Récapitulatif sous le formulaire
     if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
         st.write("---")
         st.markdown("### 📊 Dernières équipes générées")
