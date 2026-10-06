@@ -11,7 +11,7 @@ import re
 import base64
 from github import Github, GithubException
 
-# Fichiers requis
+# Fichiers et dossiers requis
 DATA_FILE = 'database_joueurs_v2.xlsx'       
 BACKUP_FILE = 'database_joueurs_v2_backup.xlsx'
 JOKERS_FILE = 'database_jokers.xlsx'
@@ -21,6 +21,9 @@ YELLOW_CARD_PATH = 'card_yellow.png'
 FONT_PATH = 'FootballAttack.otf'
 LOGO_PATH = 'icon_ffl.png'
 IMAGE_PATH = 'Intro.jpeg'
+FUT_CARDS_DIR = 'cards_fut'
+
+os.makedirs(FUT_CARDS_DIR, exist_ok=True)
 
 # --- 1. CHARGEMENT DE L'ICÔNE ---
 app_icon = "⚽"
@@ -133,8 +136,8 @@ if 'match_jokers_list' not in st.session_state:
 
 NUMERIC_OPTIONS = list(range(1, 11))
 
+# --- GESTION GITHUB ---
 def push_file_to_github(file_path: str, content_bytes: bytes, commit_message: str) -> bool:
-    """Pousse un fichier binaire (.xlsx) sur GitHub pour persistance."""
     token = st.secrets.get("GITHUB_TOKEN")
     repo_name = st.secrets.get("GITHUB_REPO")
     branch = st.secrets.get("GITHUB_BRANCH", "main")
@@ -166,8 +169,42 @@ def push_file_to_github(file_path: str, content_bytes: bytes, commit_message: st
                 raise ge
         return True
     except Exception as e:
-        st.error(f"❌ Erreur lors de la synchronisation GitHub : {e}")
+        st.error(f"❌ Erreur synchronisation GitHub ({file_path}) : {e}")
         return False
+
+def delete_file_from_github(file_path: str, commit_message: str) -> bool:
+    token = st.secrets.get("GITHUB_TOKEN")
+    repo_name = st.secrets.get("GITHUB_REPO")
+    branch = st.secrets.get("GITHUB_BRANCH", "main")
+
+    if not token or not repo_name:
+        return False
+
+    try:
+        g = Github(token)
+        repo = g.get_repo(repo_name)
+        try:
+            file_content = repo.get_contents(file_path, ref=branch)
+            repo.delete_file(file_content.path, commit_message, file_content.sha, branch=branch)
+            return True
+        except GithubException as ge:
+            if ge.status == 404:
+                return True
+            raise ge
+    except Exception as e:
+        st.error(f"❌ Erreur suppression GitHub ({file_path}) : {e}")
+        return False
+
+# --- GESTION DES CARTES FUT ---
+def get_player_id(player_name: str) -> str:
+    """Génère un identifiant fichier sécurisé à partir du nom du joueur."""
+    clean = re.sub(r'[^a-zA-Z0-9]', '_', str(player_name).strip().lower())
+    return re.sub(r'_+', '_', clean).strip('_')
+
+def get_custom_card_path(player_name: str) -> str:
+    pid = get_player_id(player_name)
+    path = os.path.join(FUT_CARDS_DIR, f"{pid}.png")
+    return path if os.path.exists(path) else None
 
 def text_to_score(val):
     if pd.isna(val):
@@ -316,11 +353,16 @@ if st.session_state.get('show_landing', True):
 # ==========================================
 # ⚽ RENDU DU TERRAIN & POPUP
 # ==========================================
-def create_player_card(card_path, player_name):
+def create_player_card(card_path, player_name, is_custom_fut=False):
     if not os.path.exists(card_path):
         return None
     
     card_img = Image.open(card_path).convert("RGBA")
+    
+    # Si c'est une carte FUT personnalisée, on ne rajoute aucun texte par-dessus
+    if is_custom_fut:
+        return card_img
+
     draw = ImageDraw.Draw(card_img)
     w, h = card_img.size
     
@@ -374,8 +416,14 @@ def draw_combined_field(t1, t2):
         p_name = str(row['Nom du Joueur'])
         is_joker = bool(row.get('is_joker', False))
         
-        card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else BLUE_CARD_PATH
-        card_img = create_player_card(card_file, p_name)
+        custom_fut = get_custom_card_path(p_name) if not is_joker else None
+        if custom_fut:
+            card_img = create_player_card(custom_fut, p_name, is_custom_fut=True)
+        elif is_joker:
+            card_file = YELLOW_CARD_PATH if os.path.exists(YELLOW_CARD_PATH) else BLUE_CARD_PATH
+            card_img = create_player_card(card_file, p_name)
+        else:
+            card_img = create_player_card(BLUE_CARD_PATH, p_name)
         
         if card_img:
             ax.imshow(card_img, extent=[x - card_width/2, x + card_width/2, y - card_height/2, y + card_height/2], zorder=3)
@@ -396,8 +444,14 @@ def draw_combined_field(t1, t2):
         p_name = str(row['Nom du Joueur'])
         is_joker = bool(row.get('is_joker', False))
         
-        card_file = YELLOW_CARD_PATH if (is_joker and os.path.exists(YELLOW_CARD_PATH)) else RED_CARD_PATH
-        card_img = create_player_card(card_file, p_name)
+        custom_fut = get_custom_card_path(p_name) if not is_joker else None
+        if custom_fut:
+            card_img = create_player_card(custom_fut, p_name, is_custom_fut=True)
+        elif is_joker:
+            card_file = YELLOW_CARD_PATH if os.path.exists(YELLOW_CARD_PATH) else RED_CARD_PATH
+            card_img = create_player_card(card_file, p_name)
+        else:
+            card_img = create_player_card(RED_CARD_PATH, p_name)
         
         if card_img:
             ax.imshow(card_img, extent=[x - card_width/2, x + card_width/2, y - card_height/2, y + card_height/2], zorder=3)
@@ -443,7 +497,6 @@ def show_teams_popup(t1, t2):
         st.rerun()
 
 def compute_teams(players_list, j1, j2, force_t1_names, force_t2_names):
-    """Équilibre les équipes en respectant les affinités T1, T2 et les exclusions."""
     best_diff = float('inf')
     best_team1, best_team2 = None, None
     valid_combo_found = False
@@ -529,15 +582,13 @@ with tab1:
                 stop_pattern = r"\n\s*(jokers?|absents?|infirmerie|en attente|à confirmer|a confirmer)\b"
                 target_text = re.split(stop_pattern, target_text, flags=re.IGNORECASE)[0]
 
-                # Ajoute une virgule si une parenthèse fermante est suivie d'une lettre (oubli de virgule)
                 target_text = re.sub(r"\)\s*(?=[a-zA-ZÀ-ÿ])", "), ", target_text)
 
-                # Découpage sur virgules, points-virgules ou retours à la ligne
                 raw_segments = re.split(r"[\n,;]+", target_text)
                 cleaned_names = []
                 for seg in raw_segments:
-                    s = re.sub(r"\(\s*\d+\s*\)", "", seg)       # Retire (3), ( 4 ), etc.
-                    s = re.sub(r"^\s*[\d\.\-\*\•\:]+\s*", "", s) # Retire puces et chiffres de tête
+                    s = re.sub(r"\(\s*\d+\s*\)", "", seg)
+                    s = re.sub(r"^\s*[\d\.\-\*\•\:]+\s*", "", s)
                     s = s.strip()
                     if s:
                         cleaned_names.append(s)
@@ -574,7 +625,6 @@ with tab1:
                 st.session_state.unknown_names = unknown_names
                 st.session_state.ambiguous_matches = ambiguous_matches
 
-                # FORCER L'ÉTAT DES CHECKBOXES DANS SESSION_STATE POUR AFFICHAGE IMMÉDIAT
                 for p_name in df_db["Nom du Joueur"].dropna().unique():
                     st.session_state[f"chk_p_{p_name}"] = (p_name in found_players)
 
@@ -611,7 +661,6 @@ with tab1:
         current_unknown = st.session_state.unknown_names[0]
         st.markdown(f"Le nom **'{current_unknown}'** de la convocation n'est pas reconnu.")
         
-        # Liste des jokers existants dans la base
         jokers_db = st.session_state.jokers_db
         db_joker_names = sorted(jokers_db["Nom Joker"].dropna().unique().tolist()) if not jokers_db.empty and "Nom Joker" in jokers_db.columns else []
 
@@ -630,7 +679,7 @@ with tab1:
             key=f"choice_{current_unknown}"
         )
         
-        # --- CAS 1 : ASSIGNER DIRECTEMENT À UN JOKER ---
+        # CAS 1 : JOKER
         if choice == "Associer à un Joker de la base (pour ce match)":
             selected_jk = st.selectbox("Sélectionner le Joker dans la base :", options=db_joker_names)
             jk_data = jokers_db[jokers_db["Nom Joker"] == selected_jk].iloc[0]
@@ -656,7 +705,7 @@ with tab1:
                 st.success(f"'{final_name}' ajouté à la liste des Jokers du jour !")
                 st.rerun()
 
-        # --- CAS 2 : ASSOCIER EN TANT QUE SURNOM D'UN JOUEUR RÉGULIER ---
+        # CAS 2 : SURNOM
         elif choice == "Associer ce surnom à un joueur existant dans la BDD":
             linked_name = st.selectbox("Sélectionner le profil existant :", options=db_names)
             if st.button(f"Associer '{current_unknown}' comme surnom de {linked_name}"):
@@ -674,7 +723,7 @@ with tab1:
                 st.success(f"Surnom '{current_unknown}' enregistré pour {linked_name} !")
                 st.rerun()
 
-        # --- CAS 3 : CRÉATION D'UN NOUVEAU TITULAIRE ---
+        # CAS 3 : NOUVEAU JOUEUR
         else:
             with st.form(f"form_quick_add_{current_unknown}"):
                 new_clean_name = st.text_input("Nom officiel pour la BDD", value=current_unknown)
@@ -707,7 +756,6 @@ with tab1:
     df_sorted = st.session_state.players_df.sort_values(by="Nom du Joueur").reset_index(drop=True)
     all_names = df_sorted["Nom du Joueur"].tolist()
     
-    # Initialisation stable des clés de checkbox
     for name in all_names:
         key = f"chk_p_{name}"
         if key not in st.session_state:
@@ -938,7 +986,7 @@ with tab1:
             st.progress(col2 / 50)
 
 # ==========================================
-# 🏃 TAB 2 : GESTION DES BASES (JOUEURS & JOKERS)
+# 🏃 TAB 2 : GESTION DES BASES (JOUEURS, JOKERS & CARTES FUT)
 # ==========================================
 with tab2:
     st.header("Gestion des Bases de Données")
@@ -984,11 +1032,59 @@ with tab2:
                         save_data(st.session_state.players_df)
                         st.session_state.db_editor_version += 1
                         st.session_state.auto_selected.discard(player_to_delete)
+                        
+                        # Suppression de sa carte FUT associée le cas échéant
+                        custom_card = get_custom_card_path(player_to_delete)
+                        if custom_card:
+                            os.remove(custom_card)
+                            delete_file_from_github(custom_card, f"Suppression carte FUT pour {player_to_delete}")
+
                         st.success(f"✅ {player_to_delete} supprimé et synchronisé sur GitHub !")
                         st.rerun()
                 else:
                     st.info("Aucun joueur dans la base.")
+
+        st.write("---")
+
+        # --- MODULE D'UPLOAD DES CARTES FUT ---
+        st.subheader("🎴 Cartes FUT Personnalisées (PNG)")
+        all_players_fut = sorted(list(st.session_state.players_df["Nom du Joueur"].values))
+
+        if all_players_fut:
+            col_fut_sel, col_fut_up, col_fut_preview = st.columns([2, 3, 2])
+            with col_fut_sel:
+                selected_p_fut = st.selectbox("Joueur concerné :", options=all_players_fut, key="sel_player_fut")
+                existing_card_path = get_custom_card_path(selected_p_fut)
+                
+                if existing_card_path:
+                    st.success("✅ Carte FUT active !")
+                    if st.button("🗑️ Supprimer la carte FUT", key="btn_del_fut"):
+                        os.remove(existing_card_path)
+                        delete_file_from_github(existing_card_path, f"Suppression carte FUT de {selected_p_fut}")
+                        st.success("Carte FUT supprimée. Le joueur réutilisera la carte générique.")
+                        st.rerun()
+                else:
+                    st.info("Aucune carte FUT personnalisée pour ce joueur (carte par défaut utilisée).")
+
+            with col_fut_up:
+                uploaded_fut = st.file_uploader(f"Uploader la carte FUT PNG pour {selected_p_fut}", type=["png"], key=f"up_fut_{selected_p_fut}")
+                if uploaded_fut is not None:
+                    if st.button("💾 Enregistrer la carte FUT", type="primary", key="btn_save_fut"):
+                        file_bytes = uploaded_fut.getvalue()
+                        pid = get_player_id(selected_p_fut)
+                        target_path = os.path.join(FUT_CARDS_DIR, f"{pid}.png")
                         
+                        with open(target_path, "wb") as f:
+                            f.write(file_bytes)
+                            
+                        push_file_to_github(target_path, file_bytes, f"Ajout carte FUT personnalisée pour {selected_p_fut}")
+                        st.success(f"✅ Carte FUT enregistrée et rattachée à {selected_p_fut} !")
+                        st.rerun()
+
+            with col_fut_preview:
+                if existing_card_path:
+                    st.image(existing_card_path, caption=f"Carte de {selected_p_fut}", width=140)
+
         st.write("---")
         st.subheader("📝 Modification et édition directe de l'effectif")
         
@@ -1173,7 +1269,7 @@ with tab2:
             output_buffer_j.seek(0)
             
             st.download_button(
-                label="⬇️️ Télécharger la base Jokers (.xlsx)",
+                label="⬇️ Télécharger la base Jokers (.xlsx)",
                 data=output_buffer_j,
                 file_name="database_jokers.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
