@@ -514,54 +514,78 @@ tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion des Bases"])
 # ⚖️ TAB 1 : ÉQUILIBRAGE DU JOUR
 # ==========================================
 with tab1:
-    with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=False):
-        convoc_text = st.text_area("Colle le texte brut de ta convocation ici :", height=150, placeholder="Présents : nicoP (1) , dimeh(2)...")
+   with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=True):
+        convoc_text = st.text_area(
+            "Colle le texte brut de ta convocation ici :", 
+            height=150, 
+            placeholder="Présents :\nNico P (1), Cédric (2), Invité mystère (3)..."
+        )
         
         if st.button("🔍 Extraire et Valider les Joueurs"):
             if convoc_text.strip():
-                match = re.search(r"Présents\s*:\s*(.*)", convoc_text, re.IGNORECASE)
-                if match:
-                    raw_presents = match.group(1).split("\n")[0]
-                    cleaned_line = re.sub(r"\(\s*\d+\s*\)", "", raw_presents)
-                    extracted_names = [n.strip() for n in re.split(r"[, ]+", cleaned_line) if n.strip()]
+                # 1. Isoler la section des présents si un mot-clé existe, sinon prendre tout le texte
+                match_presents = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
+                target_text = match_presents.group(1) if match_presents else convoc_text
+
+                # 2. Stopper la lecture si une section secondaire commence
+                stop_pattern = r"\n\s*(jokers?|absents?|infirmerie|en attente|à confirmer|a confirmer)\b"
+                target_text = re.split(stop_pattern, target_text, flags=re.IGNORECASE)[0]
+
+                # 3. Découpage strict entre virgules, points-virgules ou sauts de ligne
+                raw_segments = re.split(r"[\n,;]+", target_text)
+                
+                cleaned_names = []
+                for seg in raw_segments:
+                    # Supprime les numérotations entre parenthèses : (1), ( 2 ), (10)
+                    s = re.sub(r"\(\s*\d+\s*\)", "", seg)
+                    # Supprime les puces et numérotations de début : "1.", "1 -", "•", "-"
+                    s = re.sub(r"^\s*[\d\.\-\*\•\:]+\s*", "", s)
+                    s = s.strip()
+                    if s:
+                        cleaned_names.append(s)
+
+                # 4. Construction de la table de correspondance (noms exacts et surnoms)
+                df_db = st.session_state.players_df
+                alias_map = {}
+                for _, row in df_db.iterrows():
+                    real_name = str(row["Nom du Joueur"]).strip()
+                    alias_map.setdefault(real_name.lower(), []).append(real_name)
                     
-                    df_db = st.session_state.players_df
-                    alias_map = {}
-                    for _, row in df_db.iterrows():
-                        real_name = row["Nom du Joueur"]
-                        alias_map.setdefault(real_name.lower(), []).append(real_name)
-                        surnoms = [s.strip().lower() for s in str(row["Surnoms"]).split(",") if s.strip()]
-                        for s in surnoms:
-                            if real_name not in alias_map.setdefault(s, []):
-                                alias_map[s].append(real_name)
-                    
-                    found_players = set()
-                    unknown_names = []
-                    ambiguous_matches = []
-                    
-                    for raw_name in extracted_names:
-                        key = raw_name.lower()
-                        if key in alias_map:
-                            candidates = alias_map[key]
-                            if len(candidates) == 1:
-                                found_players.add(candidates[0])
-                            else:
-                                ambiguous_matches.append({
-                                    "convoc_name": raw_name,
-                                    "candidates": candidates
-                                })
+                    surnoms = [sn.strip().lower() for sn in str(row.get("Surnoms", "")).split(",") if sn.strip()]
+                    for sn in surnoms:
+                        if real_name not in alias_map.setdefault(sn, []):
+                            alias_map[sn].append(real_name)
+
+                found_players = set()
+                unknown_names = []
+                ambiguous_matches = []
+
+                # 5. Rapprochement direct de chaque bloc extrait
+                for candidate in cleaned_names:
+                    key = candidate.lower()
+                    if key in alias_map:
+                        matches = alias_map[key]
+                        if len(matches) == 1:
+                            found_players.add(matches[0])
                         else:
-                            unknown_names.append(raw_name)
-                    
-                    st.session_state.auto_selected = found_players
-                    st.session_state.unknown_names = unknown_names
-                    st.session_state.ambiguous_matches = ambiguous_matches
-                    
-                    if not unknown_names and not ambiguous_matches:
-                        st.success(f"✅ {len(found_players)} joueurs reconnus et cochés sans ambiguïté !")
-                        st.rerun()
-                else:
-                    st.error("Le mot 'Présents :' n'a pas été trouvé dans le texte.")
+                            ambiguous_matches.append({
+                                "convoc_name": candidate,
+                                "candidates": matches
+                            })
+                    else:
+                        # Si aucun match direct, toute la chaîne entre virgules est retenue comme inconnue
+                        unknown_names.append(candidate)
+
+                st.session_state.auto_selected = found_players
+                st.session_state.unknown_names = unknown_names
+                st.session_state.ambiguous_matches = ambiguous_matches
+
+                if found_players:
+                    st.success(f"✅ {len(found_players)} joueur(s) reconnu(s) : {', '.join(found_players)}")
+                if unknown_names:
+                    st.warning(f"⚠️ {len(unknown_names)} joueur(s) non reconnu(s) : {', '.join(unknown_names)}")
+                
+                st.rerun()
             else:
                 st.error("Le texte est vide.")
 
