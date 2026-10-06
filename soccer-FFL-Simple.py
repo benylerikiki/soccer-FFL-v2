@@ -606,13 +606,53 @@ with tab1:
         current_unknown = st.session_state.unknown_names[0]
         st.markdown(f"Le nom **'{current_unknown}'** de la convocation n'est pas reconnu.")
         
+        # Liste des jokers existants dans la base
+        jokers_db = st.session_state.jokers_db
+        db_joker_names = sorted(jokers_db["Nom Joker"].dropna().unique().tolist()) if not jokers_db.empty and "Nom Joker" in jokers_db.columns else []
+
+        options_resolution = [
+            "Associer à un Joker de la base (pour ce match)",
+            "Associer ce surnom à un joueur existant dans la BDD", 
+            "Créer un tout nouveau joueur"
+        ] if db_joker_names else [
+            "Associer ce surnom à un joueur existant dans la BDD", 
+            "Créer un tout nouveau joueur"
+        ]
+
         choice = st.radio(
             f"Que faire pour '{current_unknown}' ?", 
-            ["Associer ce surnom à un joueur existant dans la BDD", "Créer un tout nouveau joueur"], 
+            options_resolution, 
             key=f"choice_{current_unknown}"
         )
         
-        if choice == "Associer ce surnom à un joueur existant dans la BDD":
+        # --- CAS 1 : ASSIGNER DIRECTEMENT À UN JOKER ---
+        if choice == "Associer à un Joker de la base (pour ce match)":
+            selected_jk = st.selectbox("Sélectionner le Joker dans la base :", options=db_joker_names)
+            jk_data = jokers_db[jokers_db["Nom Joker"] == selected_jk].iloc[0]
+            
+            c_inf1, c_inf2 = st.columns(2)
+            with c_inf1:
+                st.caption(f"Hôte : **{jk_data.get('Joueur Rattaché', 'Aucun')}**")
+            with c_inf2:
+                st.caption(f"Note Globale : **{jk_data.get('Note Globale', 5)}/10**")
+
+            if st.button(f"🃏 Retenir '{selected_jk}' comme Joker pour le match"):
+                final_name = f"Joker {selected_jk}" if not str(selected_jk).startswith("Joker") else str(selected_jk)
+                st.session_state.match_jokers_list.append({
+                    "Nom du Joueur": final_name,
+                    "Attaque": text_to_score(jk_data.get("Attaque", 5)),
+                    "Défense": text_to_score(jk_data.get("Défense", 5)),
+                    "Gardien": text_to_score(jk_data.get("Gardien", 5)),
+                    "Collectif": text_to_score(jk_data.get("Collectif", 5)),
+                    "Surnoms": "",
+                    "is_joker": True
+                })
+                st.session_state.unknown_names.pop(0)
+                st.success(f"'{final_name}' ajouté à la liste des Jokers du jour !")
+                st.rerun()
+
+        # --- CAS 2 : ASSOCIER EN TANT QUE SURNOM D'UN JOUEUR RÉGULIER ---
+        elif choice == "Associer ce surnom à un joueur existant dans la BDD":
             linked_name = st.selectbox("Sélectionner le profil existant :", options=db_names)
             if st.button(f"Associer '{current_unknown}' comme surnom de {linked_name}"):
                 idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == linked_name].index[0]
@@ -627,6 +667,8 @@ with tab1:
                 st.session_state.unknown_names.pop(0)
                 st.success(f"Surnom '{current_unknown}' enregistré pour {linked_name} !")
                 st.rerun()
+
+        # --- CAS 3 : CRÉATION D'UN NOUVEAU TITULAIRE ---
         else:
             with st.form(f"form_quick_add_{current_unknown}"):
                 new_clean_name = st.text_input("Nom officiel pour la BDD", value=current_unknown)
@@ -943,7 +985,7 @@ with tab2:
                             st.error("Le nom est vide ou existe déjà.")
 
         with col_del:
-            with st.expander("🗑️️ Supprimer un joueur de la BDD"):
+            with st.expander("🗑️ Supprimer un joueur de la BDD"):
                 all_players = sorted(list(st.session_state.players_df["Nom du Joueur"].values))
                 if all_players:
                     player_to_delete = st.selectbox("Sélectionner le joueur à supprimer :", options=all_players)
