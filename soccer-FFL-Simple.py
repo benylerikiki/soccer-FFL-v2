@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import pandas as pd
 import os
@@ -20,12 +21,20 @@ HISTORY_FILE = 'database_historique.xlsx'
 BLUE_CARD_PATH = 'card_blue.png'
 RED_CARD_PATH = 'card_red.png'
 YELLOW_CARD_PATH = 'card_yellow.png'
-FONT_PATH = 'FootballAttack.otf'
+DEFAULT_FONT_PATH = 'FootballAttack.otf'
 LOGO_PATH = 'icon_ffl.png'
 IMAGE_PATH = 'Intro.jpeg'
 FUT_CARDS_DIR = 'cards_fut'
+FONTS_DIR = 'fonts'
 
 os.makedirs(FUT_CARDS_DIR, exist_ok=True)
+os.makedirs(FONTS_DIR, exist_ok=True)
+
+# Déplacer/Copier la police par défaut dans fonts/ si elle existe à la racine
+if os.path.exists(DEFAULT_FONT_PATH):
+    dest_default = os.path.join(FONTS_DIR, DEFAULT_FONT_PATH)
+    if not os.path.exists(dest_default):
+        shutil.copyfile(DEFAULT_FONT_PATH, dest_default)
 
 # --- 1. CHARGEMENT DE L'ICÔNE ---
 app_icon = "⚽"
@@ -135,6 +144,16 @@ if 'auto_selected' not in st.session_state:
 
 if 'match_jokers_list' not in st.session_state:
     st.session_state.match_jokers_list = []
+
+if 'active_font_path' not in st.session_state:
+    # Police active par défaut
+    default_in_folder = os.path.join(FONTS_DIR, DEFAULT_FONT_PATH)
+    if os.path.exists(default_in_folder):
+        st.session_state['active_font_path'] = default_in_folder
+    elif os.path.exists(DEFAULT_FONT_PATH):
+        st.session_state['active_font_path'] = DEFAULT_FONT_PATH
+    else:
+        st.session_state['active_font_path'] = None
 
 NUMERIC_OPTIONS = list(range(1, 11))
 
@@ -360,7 +379,6 @@ def save_match_to_history(df_t1, df_t2):
 
     hist_df = pd.concat([new_row, hist_df], ignore_index=True)
     
-    # Conservation stricte des 100 dernières compositions
     if len(hist_df) > 100:
         hist_df = hist_df.iloc[:100]
 
@@ -413,7 +431,19 @@ if st.session_state.get('show_landing', True):
 # ==========================================
 # ⚽ RENDU DU TERRAIN & POPUP
 # ==========================================
-def create_player_card(card_path, player_name, is_custom_fut=False):
+def get_current_font(font_size):
+    font_path = st.session_state.get('active_font_path')
+    if font_path and os.path.exists(font_path):
+        try:
+            return ImageFont.truetype(font_path, font_size)
+        except Exception:
+            pass
+    try:
+        return ImageFont.truetype(DEFAULT_FONT_PATH, font_size)
+    except Exception:
+        return ImageFont.load_default()
+
+def create_player_card(card_path, player_name, is_custom_fut=False, override_font_path=None):
     if not os.path.exists(card_path):
         return None
     
@@ -437,21 +467,27 @@ def create_player_card(card_path, player_name, is_custom_fut=False):
     else:
         lines = [raw_name.upper()]
     
-    while font_size > 10:
+    used_font_path = override_font_path or st.session_state.get('active_font_path')
+    
+    def load_font_obj(sz):
+        if used_font_path and os.path.exists(used_font_path):
+            try:
+                return ImageFont.truetype(used_font_path, sz)
+            except Exception:
+                pass
         try:
-            font = ImageFont.truetype(FONT_PATH, font_size)
+            return ImageFont.truetype(DEFAULT_FONT_PATH, sz)
         except Exception:
-            font = ImageFont.load_default()
+            return ImageFont.load_default()
 
+    while font_size > 10:
+        font = load_font_obj(font_size)
         widths = [(draw.textbbox((0, 0), line, font=font)[2] - draw.textbbox((0, 0), line, font=font)[0]) for line in lines]
         if max(widths) <= max_text_width:
             break
         font_size -= 2
 
-    try:
-        font = ImageFont.truetype(FONT_PATH, font_size)
-    except Exception:
-        font = ImageFont.load_default()
+    font = load_font_obj(font_size)
 
     if len(lines) == 1:
         text_bbox = draw.textbbox((0, 0), lines[0], font=font)
@@ -653,7 +689,7 @@ if st.session_state.get("open_teams_popup", False):
     st.session_state.open_teams_popup = False
     show_teams_popup(st.session_state.last_team1, st.session_state.last_team2)
 
-tab1, tab_hist, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "📜 Historique", "🏃 Gestion des Bases"])
+tab1, tab_hist, tab_font, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "📜 Historique", "🎨 Police", "🏃 Gestion des Bases"])
 
 # ==========================================
 # ⚖️ TAB 1 : ÉQUILIBRAGE DU JOUR
@@ -1090,7 +1126,6 @@ with tab_hist:
     else:
         st.write(f"**Total enregistrements :** {len(hist_data)} / 100 max")
         
-        # Liste déroulante des matchs enregistrés
         match_labels = [f"📅 {row['Date']} — T1: {row['T1_Joueurs']} vs T2: {row['T2_Joueurs']}" for _, row in hist_data.iterrows()]
         selected_match_idx = st.selectbox("🔍 Sélectionner un match passé à consulter ou renvoyer :", options=range(len(match_labels)), format_func=lambda i: match_labels[i])
 
@@ -1123,7 +1158,6 @@ with tab_hist:
         display_hist_df = hist_data[["ID Match", "Date", "T1_Joueurs", "T2_Joueurs", "T1_Att", "T1_Def", "T2_Att", "T2_Def"]].copy()
         st.dataframe(display_hist_df, hide_index=True, use_container_width=True)
 
-        # Export Excel de l'historique
         output_hist = io.BytesIO()
         with pd.ExcelWriter(output_hist, engine='openpyxl') as writer:
             hist_data.to_excel(writer, index=False)
@@ -1135,6 +1169,88 @@ with tab_hist:
             file_name="database_historique.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+# ==========================================
+# 🎨 TAB POLICE DE GÉNÉRATION
+# ==========================================
+with tab_font:
+    st.header("🎨 Sélection & Gestion de la Police des Cartes")
+
+    # Lister les fichiers de polices disponibles dans le dossier fonts/
+    available_fonts = []
+    if os.path.exists(FONTS_DIR):
+        available_fonts = [f for f in os.listdir(FONTS_DIR) if f.lower().endswith(('.otf', '.ttf'))]
+    
+    # Inclure également la police par défaut à la racine si elle y est
+    if os.path.exists(DEFAULT_FONT_PATH) and DEFAULT_FONT_PATH not in available_fonts:
+        available_fonts.append(DEFAULT_FONT_PATH)
+
+    available_fonts = sorted(list(set(available_fonts)))
+
+    col_f1, col_f2 = st.columns([3, 2])
+
+    with col_f1:
+        st.subheader("1. Sélection de la police active")
+        if not available_fonts:
+            st.info("Aucune police personnalisée trouvée dans `fonts/`. La police système par défaut est utilisée.")
+        else:
+            # Identifier l'index de la police actuellement active
+            current_active = st.session_state.get('active_font_path', '')
+            current_filename = os.path.basename(current_active) if current_active else (available_fonts[0] if available_fonts else "")
+            
+            default_index = available_fonts.index(current_filename) if current_filename in available_fonts else 0
+
+            selected_font_filename = st.selectbox(
+                "Choisir la police à utiliser pour la génération :",
+                options=available_fonts,
+                index=default_index,
+                key="selectbox_font_choice"
+            )
+
+            # Chemin complet du fichier choisi
+            chosen_font_path = os.path.join(FONTS_DIR, selected_font_filename) if os.path.exists(os.path.join(FONTS_DIR, selected_font_filename)) else selected_font_filename
+
+            if st.button("💾 Valider et Appliquer cette Police", type="primary"):
+                st.session_state['active_font_path'] = chosen_font_path
+                st.success(f"✅ Police active mise à jour : **{selected_font_filename}** !")
+                st.rerun()
+
+        st.write("---")
+        st.subheader("2. Charger une nouvelle police (.otf / .ttf)")
+        uploaded_font_file = st.file_uploader("Importer un fichier de police", type=["otf", "ttf"], key="font_file_uploader")
+        
+        if uploaded_font_file is not None:
+            if st.button("📤 Enregistrer la police dans le dossier `fonts/`"):
+                font_filename = uploaded_font_file.name
+                target_font_path = os.path.join(FONTS_DIR, font_filename)
+                
+                font_bytes = uploaded_font_file.getvalue()
+                with open(target_font_path, "wb") as f:
+                    f.write(font_bytes)
+                
+                push_file_to_github(target_font_path, font_bytes, f"Ajout police {font_filename}")
+                st.session_state['active_font_path'] = target_font_path
+                st.success(f"✅ Police **{font_filename}** ajoutée et sélectionnée avec succès !")
+                st.rerun()
+
+    with col_f2:
+        st.subheader("👁️ Prévisualisation")
+        st.caption("Aperçu de la carte FUT générique avec le prénom **Léo** :")
+
+        # Déterminer la police à prévisualiser (celle sélectionnée dans la dropdown ou l'actuelle)
+        preview_font_filename = st.session_state.get("selectbox_font_choice", os.path.basename(st.session_state.get('active_font_path', DEFAULT_FONT_PATH)))
+        preview_font_path = os.path.join(FONTS_DIR, preview_font_filename) if os.path.exists(os.path.join(FONTS_DIR, preview_font_filename)) else preview_font_filename
+
+        card_bg = BLUE_CARD_PATH if os.path.exists(BLUE_CARD_PATH) else (RED_CARD_PATH if os.path.exists(RED_CARD_PATH) else None)
+
+        if card_bg:
+            preview_card_img = create_player_card(card_bg, "Léo", is_custom_fut=False, override_font_path=preview_font_path)
+            if preview_card_img:
+                st.image(preview_card_img, caption=f"Rendu avec : {preview_font_filename}", width=200)
+            else:
+                st.warning("Impossible d'effectuer le rendu de l'image.")
+        else:
+            st.info("Image de carte par défaut (`card_blue.png`) introuvable pour la prévisualisation.")
 
 # ==========================================
 # 🏃 TAB 2 : GESTION DES BASES (JOUEURS, JOKERS & CARTES FUT)
