@@ -197,7 +197,6 @@ def delete_file_from_github(file_path: str, commit_message: str) -> bool:
 
 # --- GESTION DES CARTES FUT ---
 def get_player_id(player_name: str) -> str:
-    """Génère un identifiant fichier sécurisé à partir du nom du joueur."""
     clean = re.sub(r'[^a-zA-Z0-9]', '_', str(player_name).strip().lower())
     return re.sub(r'_+', '_', clean).strip('_')
 
@@ -359,30 +358,68 @@ def create_player_card(card_path, player_name, is_custom_fut=False):
     
     card_img = Image.open(card_path).convert("RGBA")
     
-    # Si c'est une carte FUT personnalisée, on ne rajoute aucun texte par-dessus
+    # Si c'est une carte FUT personnalisée, aucun texte supplémentaire n'est dessiné
     if is_custom_fut:
         return card_img
 
     draw = ImageDraw.Draw(card_img)
     w, h = card_img.size
+    max_text_width = w * 0.85  # Marge de sécurité de 85% de la largeur de la carte
     
     y_pos = int(h * (2 / 3))
     font_size = max(24, int(w * 0.18))
+    stroke_w = max(2, int(font_size * 0.07))
+    
+    # Formatage spécifique si le joueur est un Joker (retour à la ligne)
+    raw_name = player_name.strip()
+    if raw_name.lower().startswith("joker"):
+        # Découpage pour isoler le prénom après "Joker "
+        parts = raw_name.split(maxsplit=1)
+        lines = ["JOKER", parts[1].upper()] if len(parts) > 1 else ["JOKER"]
+    else:
+        lines = [raw_name.upper()]
+    
+    # Réduction dynamique de la taille de police si le texte dépasse la largeur
+    while font_size > 10:
+        try:
+            font = ImageFont.truetype(FONT_PATH, font_size)
+        except Exception:
+            font = ImageFont.load_default()
+
+        # Calcul de la largeur max parmi les lignes
+        widths = [(draw.textbbox((0, 0), line, font=font)[2] - draw.textbbox((0, 0), line, font=font)[0]) for line in lines]
+        if max(widths) <= max_text_width:
+            break
+        font_size -= 2
+
     try:
         font = ImageFont.truetype(FONT_PATH, font_size)
     except Exception:
         font = ImageFont.load_default()
+
+    # Dessin du texte sur 1 ou 2 lignes (centré)
+    if len(lines) == 1:
+        text_bbox = draw.textbbox((0, 0), lines[0], font=font)
+        text_w = text_bbox[2] - text_bbox[0]
+        text_h = text_bbox[3] - text_bbox[1]
+        x_pos = (w - text_w) / 2
+        y_pos_centered = y_pos - (text_h / 2)
+        draw.text((x_pos, y_pos_centered), lines[0], fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
+    else:
+        bbox0 = draw.textbbox((0, 0), lines[0], font=font)
+        bbox1 = draw.textbbox((0, 0), lines[1], font=font)
+        h0 = bbox0[3] - bbox0[1]
+        h1 = bbox1[3] - bbox1[1]
+        w0 = bbox0[2] - bbox0[0]
+        w1 = bbox1[2] - bbox1[0]
         
-    text_bbox = draw.textbbox((0, 0), player_name.upper(), font=font)
-    text_w = text_bbox[2] - text_bbox[0]
-    text_h = text_bbox[3] - text_bbox[1]
-    
-    x_pos = (w - text_w) / 2
-    y_pos_centered = y_pos - (text_h / 2)
-    
-    stroke_w = max(2, int(font_size * 0.07))
-    draw.text((x_pos, y_pos_centered), player_name.upper(), fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
-    
+        spacing = 4
+        total_h = h0 + h1 + spacing
+        start_y = y_pos - (total_h / 2)
+        
+        draw.text(((w - w0) / 2, start_y), lines[0], fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
+        draw.text(((w - w1) / 2, start_y + h0 + spacing), lines[1], fill="white", font=font, stroke_width=stroke_w, stroke_fill="black")
+
     return card_img
 
 def draw_combined_field(t1, t2):
@@ -1033,7 +1070,6 @@ with tab2:
                         st.session_state.db_editor_version += 1
                         st.session_state.auto_selected.discard(player_to_delete)
                         
-                        # Suppression de sa carte FUT associée le cas échéant
                         custom_card = get_custom_card_path(player_to_delete)
                         if custom_card:
                             os.remove(custom_card)
