@@ -9,12 +9,14 @@ import io
 import itertools
 import re
 import base64
+from datetime import datetime
 from github import Github, GithubException
 
 # Fichiers et dossiers requis
 DATA_FILE = 'database_joueurs_v2.xlsx'       
 BACKUP_FILE = 'database_joueurs_v2_backup.xlsx'
 JOKERS_FILE = 'database_jokers.xlsx'
+HISTORY_FILE = 'database_historique.xlsx'
 BLUE_CARD_PATH = 'card_blue.png'
 RED_CARD_PATH = 'card_red.png'
 YELLOW_CARD_PATH = 'card_yellow.png'
@@ -312,6 +314,65 @@ def save_jokers_db(df):
     if push_file_to_github(JOKERS_FILE, buffer.getvalue(), "Mise à jour base jokers [via Soccer FFL]"):
         st.toast("Base jokers synchronisée sur GitHub !", icon="☁️")
 
+# --- CHARGEMENT / SAUVEGARDE HISTORIQUE ---
+def load_history_db():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            return pd.read_excel(HISTORY_FILE)
+        except Exception:
+            pass
+    return pd.DataFrame(columns=[
+        "ID Match", "Date", 
+        "T1_Joueurs", "T1_Att", "T1_Def", "T1_Gk", "T1_Col",
+        "T2_Joueurs", "T2_Att", "T2_Def", "T2_Gk", "T2_Col",
+        "Team1_JSON", "Team2_JSON"
+    ])
+
+def save_match_to_history(df_t1, df_t2):
+    hist_df = load_history_db()
+    
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    t1_names = ", ".join(df_t1["Nom du Joueur"].tolist())
+    t2_names = ", ".join(df_t2["Nom du Joueur"].tolist())
+    
+    t1_att = df_t1['Attaque'].apply(text_to_score).sum()
+    t1_def = df_t1['Défense'].apply(text_to_score).sum()
+    t1_gk  = df_t1['Gardien'].apply(text_to_score).sum()
+    t1_col = df_t1['Collectif'].apply(text_to_score).sum()
+
+    t2_att = df_t2['Attaque'].apply(text_to_score).sum()
+    t2_def = df_t2['Défense'].apply(text_to_score).sum()
+    t2_gk  = df_t2['Gardien'].apply(text_to_score).sum()
+    t2_col = df_t2['Collectif'].apply(text_to_score).sum()
+
+    match_id = f"Match_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    new_row = pd.DataFrame([{
+        "ID Match": match_id,
+        "Date": now_str,
+        "T1_Joueurs": t1_names,
+        "T1_Att": t1_att, "T1_Def": t1_def, "T1_Gk": t1_gk, "T1_Col": t1_col,
+        "T2_Joueurs": t2_names,
+        "T2_Att": t2_att, "T2_Def": t2_def, "T2_Gk": t2_gk, "T2_Col": t2_col,
+        "Team1_JSON": df_t1.to_json(orient="records"),
+        "Team2_JSON": df_t2.to_json(orient="records")
+    }])
+
+    hist_df = pd.concat([new_row, hist_df], ignore_index=True)
+    
+    # Conservation stricte des 100 dernières compositions
+    if len(hist_df) > 100:
+        hist_df = hist_df.iloc[:100]
+
+    hist_df.to_excel(HISTORY_FILE, index=False)
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        hist_df.to_excel(writer, index=False)
+    buffer.seek(0)
+
+    push_file_to_github(HISTORY_FILE, buffer.getvalue(), f"Ajout composition {now_str} à l'historique")
+
 if 'players_df' not in st.session_state:
     st.session_state.players_df = load_data()
 
@@ -358,35 +419,30 @@ def create_player_card(card_path, player_name, is_custom_fut=False):
     
     card_img = Image.open(card_path).convert("RGBA")
     
-    # Si c'est une carte FUT personnalisée, aucun texte supplémentaire n'est dessiné
     if is_custom_fut:
         return card_img
 
     draw = ImageDraw.Draw(card_img)
     w, h = card_img.size
-    max_text_width = w * 0.85  # Marge de sécurité de 85% de la largeur de la carte
+    max_text_width = w * 0.85
     
     y_pos = int(h * (2 / 3))
     font_size = max(24, int(w * 0.18))
     stroke_w = max(2, int(font_size * 0.07))
     
-    # Formatage spécifique si le joueur est un Joker (retour à la ligne)
     raw_name = player_name.strip()
     if raw_name.lower().startswith("joker"):
-        # Découpage pour isoler le prénom après "Joker "
         parts = raw_name.split(maxsplit=1)
         lines = ["JOKER", parts[1].upper()] if len(parts) > 1 else ["JOKER"]
     else:
         lines = [raw_name.upper()]
     
-    # Réduction dynamique de la taille de police si le texte dépasse la largeur
     while font_size > 10:
         try:
             font = ImageFont.truetype(FONT_PATH, font_size)
         except Exception:
             font = ImageFont.load_default()
 
-        # Calcul de la largeur max parmi les lignes
         widths = [(draw.textbbox((0, 0), line, font=font)[2] - draw.textbbox((0, 0), line, font=font)[0]) for line in lines]
         if max(widths) <= max_text_width:
             break
@@ -397,7 +453,6 @@ def create_player_card(card_path, player_name, is_custom_fut=False):
     except Exception:
         font = ImageFont.load_default()
 
-    # Dessin du texte sur 1 ou 2 lignes (centré)
     if len(lines) == 1:
         text_bbox = draw.textbbox((0, 0), lines[0], font=font)
         text_w = text_bbox[2] - text_bbox[0]
@@ -598,7 +653,7 @@ if st.session_state.get("open_teams_popup", False):
     st.session_state.open_teams_popup = False
     show_teams_popup(st.session_state.last_team1, st.session_state.last_team2)
 
-tab1, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "🏃 Gestion des Bases"])
+tab1, tab_hist, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "📜 Historique", "🏃 Gestion des Bases"])
 
 # ==========================================
 # ⚖️ TAB 1 : ÉQUILIBRAGE DU JOUR
@@ -970,6 +1025,7 @@ with tab1:
             else:
                 st.session_state.last_team1 = best_team1
                 st.session_state.last_team2 = best_team2
+                save_match_to_history(best_team1, best_team2)
                 st.session_state.open_teams_popup = True
                 st.rerun()
 
@@ -1021,6 +1077,64 @@ with tab1:
             st.progress(gk2 / 50)
             st.caption(f"Collectif ({col2}/50)")
             st.progress(col2 / 50)
+
+# ==========================================
+# 📜 TAB HISTORIQUE DES COMPOSITIONS
+# ==========================================
+with tab_hist:
+    st.header("📜 Historique des Compositions (100 derniers matchs)")
+    hist_data = load_history_db()
+
+    if hist_data.empty:
+        st.info("Aucun match enregistré dans l'historique pour le moment. Générez une composition pour commencer.")
+    else:
+        st.write(f"**Total enregistrements :** {len(hist_data)} / 100 max")
+        
+        # Liste déroulante des matchs enregistrés
+        match_labels = [f"📅 {row['Date']} — T1: {row['T1_Joueurs']} vs T2: {row['T2_Joueurs']}" for _, row in hist_data.iterrows()]
+        selected_match_idx = st.selectbox("🔍 Sélectionner un match passé à consulter ou renvoyer :", options=range(len(match_labels)), format_func=lambda i: match_labels[i])
+
+        chosen_row = hist_data.iloc[selected_match_idx]
+
+        st.markdown(f"#### 🏆 Match du `{chosen_row['Date']}`")
+
+        c_hist1, c_hist2 = st.columns(2)
+        with c_hist1:
+            st.markdown(f"**🔵 ÉQUIPE 1** (Score Att:{chosen_row['T1_Att']} | Déf:{chosen_row['T1_Def']} | Gk:{chosen_row['T1_Gk']} | Col:{chosen_row['T1_Col']})")
+            df_h1 = pd.read_json(io.StringIO(chosen_row['Team1_JSON']))
+            df_h1["Note Globale"] = df_h1.apply(calculate_global_score, axis=1)
+            st.dataframe(df_h1[["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"]], hide_index=True, use_container_width=True)
+
+        with c_hist2:
+            st.markdown(f"**🔴 ÉQUIPE 2** (Score Att:{chosen_row['T2_Att']} | Déf:{chosen_row['T2_Def']} | Gk:{chosen_row['T2_Gk']} | Col:{chosen_row['T2_Col']})")
+            df_h2 = pd.read_json(io.StringIO(chosen_row['Team2_JSON']))
+            df_h2["Note Globale"] = df_h2.apply(calculate_global_score, axis=1)
+            st.dataframe(df_h2[["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"]], hide_index=True, use_container_width=True)
+
+        st.write("")
+        if st.button("🔄 Re-générer le visuel & texte WhatsApp de ce match", type="primary"):
+            st.session_state.last_team1 = df_h1
+            st.session_state.last_team2 = df_h2
+            st.session_state.open_teams_popup = True
+            st.rerun()
+
+        st.write("---")
+        st.markdown("**📊 Vue d'ensemble de la base Excel d'historique :**")
+        display_hist_df = hist_data[["ID Match", "Date", "T1_Joueurs", "T2_Joueurs", "T1_Att", "T1_Def", "T2_Att", "T2_Def"]].copy()
+        st.dataframe(display_hist_df, hide_index=True, use_container_width=True)
+
+        # Export Excel de l'historique
+        output_hist = io.BytesIO()
+        with pd.ExcelWriter(output_hist, engine='openpyxl') as writer:
+            hist_data.to_excel(writer, index=False)
+        output_hist.seek(0)
+        
+        st.download_button(
+            label="💾 Télécharger database_historique.xlsx",
+            data=output_hist,
+            file_name="database_historique.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # ==========================================
 # 🏃 TAB 2 : GESTION DES BASES (JOUEURS, JOKERS & CARTES FUT)
