@@ -49,7 +49,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS & STYLES (IMAGE TOTALEMENT CLIQUABLE VIA OVERLAY) ---
+# --- 2. CSS & STYLES (IMAGE DIRECTEMENT BOUTON) ---
 if os.path.exists(LOGO_PATH):
     with open(LOGO_PATH, "rb") as f:
         icon_bytes = f.read()
@@ -92,46 +92,41 @@ st.markdown(
         }
     }
 
-    /* CONTAINER ET DÉCORATION DE L'IMAGE CLIQUABLE */
-    .landing-wrapper {
-        position: relative;
-        width: 100%;
-        max-width: 900px;
-        margin: 0 auto;
-        display: flex;
-        justify-content: center;
-        cursor: pointer;
+    /* CONTAINER ET DÉCORATION DU BOUTON IMAGE CLIQUABLE */
+    div[data-testid="stElementContainer"]:has(button[key="img_click_btn"]) {
+        width: 100% !important;
+        max-width: 900px !important;
+        margin: 0 auto !important;
+        display: flex !important;
+        justify-content: center !important;
     }
-    .landing-img {
+
+    button[key="img_click_btn"] {
+        background: transparent !important;
+        border: none !important;
+        padding: 0 !important;
+        cursor: pointer !important;
+        width: 100% !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }
+
+    button[key="img_click_btn"]:hover img {
+        transform: scale(1.015);
+        box-shadow: 0 12px 35px rgba(40, 167, 69, 0.5);
+    }
+
+    button[key="img_click_btn"]:active img {
+        transform: scale(0.99);
+    }
+
+    .landing-img-btn {
         width: 100%;
         max-height: 80vh;
         object-fit: contain;
         border-radius: 16px;
         box-shadow: 0 8px 30px rgba(0,0,0,0.6);
         transition: transform 0.3s ease, box-shadow 0.3s ease;
-    }
-    .landing-wrapper:hover .landing-img {
-        transform: scale(1.01);
-        box-shadow: 0 12px 35px rgba(40, 167, 69, 0.4);
-    }
-
-    /* OVERLAY INVISIBLE TRANSFORMANT TOUTE L'IMAGE EN BOUTON */
-    div[data-testid="stElementContainer"]:has(button[key="img_click_btn"]) {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-        z-index: 10 !important;
-    }
-
-    button[key="img_click_btn"] {
-        width: 100% !important;
-        height: 100% !important;
-        background: transparent !important;
-        border: none !important;
-        color: transparent !important;
-        cursor: pointer !important;
     }
     </style>
     """,
@@ -406,7 +401,7 @@ if 'jokers_db' not in st.session_state:
     st.session_state.jokers_db = load_jokers_db()
 
 # ==========================================
-# 🖼️ PAGE DE GARDE (L'IMAGE EST LE BOUTON)
+# 🖼️ PAGE DE GARDE (IMAGE BOUTON DIRECTE)
 # ==========================================
 if st.session_state.get('show_landing', True):
     if os.path.exists(IMAGE_PATH):
@@ -414,17 +409,9 @@ if st.session_state.get('show_landing', True):
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
-        st.markdown(
-            f"""
-            <div class="landing-wrapper">
-                <img class="landing-img" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
+        img_html = f'<img class="landing-img-btn" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">'
         
-        # BOUTON OVERLAY TRANSPARENT SUR TOUTE L'IMAGE
-        if st.button("", key="img_click_btn"):
+        if st.button(img_html, key="img_click_btn"):
             st.session_state['show_landing'] = False
             st.rerun()
 
