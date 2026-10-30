@@ -1184,7 +1184,7 @@ with tab_hist:
 with tab_font:
     st.header("🎨 Sélection & Gestion de la Police des Cartes")
 
-  # CSS pour forcer l'affichage côte à côte et empêcher l'étirement moche de Streamlit
+    # CSS pour forcer l'affichage côte à côte et empêcher l'étirement des images
     st.markdown(
         """
         <style>
@@ -1201,7 +1201,7 @@ with tab_font:
         }
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) img {
             width: 100% !important;
-            max-width: 150px !important; /* Ajuste cette valeur si tu veux plus petit ou plus grand (ex: 120px) */
+            max-width: 150px !important;
             height: auto !important;
             object-fit: contain !important;
             display: block !important;
@@ -1260,7 +1260,7 @@ with tab_font:
                 with open(target_font_path, "wb") as f:
                     f.write(font_bytes)
                 
-                push_file_to_github(target_path, font_bytes, f"Ajout police {font_filename}")
+                push_file_to_github(target_font_path, font_bytes, f"Ajout police {font_filename}")
                 st.session_state['active_font_path'] = target_font_path
                 st.success(f"✅ Police **{font_filename}** ajoutée et sélectionnée avec succès !")
                 st.rerun()
@@ -1290,7 +1290,7 @@ with tab_font:
             ("🃏 Joker (Jaune)", YELLOW_CARD_PATH)
         ]
 
-cols_prev = st.columns(3)
+        cols_prev = st.columns(3)
         for idx_card, (card_label, card_file_path) in enumerate(cards_to_preview):
             with cols_prev[idx_card]:
                 st.caption(f"**{card_label}**")
