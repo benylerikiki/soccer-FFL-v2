@@ -1269,7 +1269,7 @@ with tab_font:
                 if os.path.exists(card_file_path):
                     prev_img = create_player_card(card_file_path, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
                     if prev_img:
-                        st.image(prev_img, use_container_width=True)
+                        st.image(prev_img, width=140)
                     else:
                         st.warning("Erreur lors du rendu.")
                 else:
