@@ -1290,7 +1290,7 @@ with tab_font:
                     prev_img = create_player_card(card_file_path, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
                     if prev_img:
                         # Redimensionnement direct de l'image PIL en Python (ex: largeur max 250 pixels) pour forcer une petite taille propre
-                        basewidth = 250
+                        basewidth = 50
                         wpercent = (basewidth / float(prev_img.size[0]))
                         hsize = int(float(prev_img.size[1]) * float(wpercent))
                         prev_img_resized = prev_img.resize((basewidth, hsize), Image.Resampling.LANCZOS)
