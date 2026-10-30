@@ -1184,7 +1184,7 @@ with tab_hist:
 with tab_font:
     st.header("🎨 Sélection & Gestion de la Police des Cartes")
 
-    # CSS pour forcer l'affichage côte à côte en 3 colonnes égales
+  # CSS pour forcer l'affichage côte à côte et empêcher l'étirement moche de Streamlit
     st.markdown(
         """
         <style>
@@ -1198,6 +1198,14 @@ with tab_font:
             width: 33.33% !important;
             min-width: 0 !important;
             flex: 1 1 33.33% !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) img {
+            width: 100% !important;
+            max-width: 150px !important; /* Ajuste cette valeur si tu veux plus petit ou plus grand (ex: 120px) */
+            height: auto !important;
+            object-fit: contain !important;
+            display: block !important;
+            margin: 0 auto !important;
         }
         </style>
         """,
