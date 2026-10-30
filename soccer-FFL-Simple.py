@@ -1369,4 +1369,229 @@ with tab2:
         st.write("---")
         st.subheader("📝 Modification et édition directe de l'effectif")
         
-        col_btn_save, col_btn_restore = st.
+        col_btn_save, col_btn_restore = st.columns([2, 2])
+        with col_btn_save:
+            btn_save_top = st.button("💾 Enregistrer les modifications", type="primary", key="save_btn_top")
+        with col_btn_restore:
+            if os.path.exists(BACKUP_FILE):
+                if st.button("⏪ Restaurer le dernier backup", help="Annule la dernière sauvegarde et restaure la base précédente"):
+                    shutil.copyfile(BACKUP_FILE, DATA_FILE)
+                    st.session_state.players_df = load_data()
+                    st.session_state.db_editor_version += 1
+                    save_data(st.session_state.players_df)
+                    st.success("✅ Base restaurée depuis le backup avec succès !")
+                    st.rerun()
+        
+        df_to_edit = st.session_state.players_df.copy()
+        if "Note Globale" in df_to_edit.columns:
+            df_to_edit = df_to_edit.drop(columns=["Note Globale"])
+        if "is_joker" in df_to_edit.columns:
+            df_to_edit = df_to_edit.drop(columns=["is_joker"])
+
+        for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
+            if col in df_to_edit.columns:
+                df_to_edit[col] = df_to_edit[col].apply(text_to_score)
+
+        column_order = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
+        df_to_edit = df_to_edit[[c for c in column_order if c in df_to_edit.columns]]
+
+        edited_players = st.data_editor(
+            df_to_edit, 
+            column_config={
+                "Nom du Joueur": st.column_config.TextColumn("Nom du Joueur", required=True),
+                "Attaque": st.column_config.SelectboxColumn("Attaque", options=NUMERIC_OPTIONS, required=True),
+                "Défense": st.column_config.SelectboxColumn("Défense", options=NUMERIC_OPTIONS, required=True),
+                "Gardien": st.column_config.SelectboxColumn("Gardien", options=NUMERIC_OPTIONS, required=True),
+                "Collectif": st.column_config.SelectboxColumn("Collectif", options=NUMERIC_OPTIONS, required=True),
+                "Surnoms": st.column_config.TextColumn("Surnoms (séparés par des virgules)", help="Ex: Nico, Nick, Ptit Nico"),
+            }, 
+            hide_index=True, 
+            use_container_width=True,
+            key=f"editor_players_{st.session_state.db_editor_version}"
+        )
+
+        st.markdown("##### 📊 Aperçu des Notes Globales (Moyennes calculées)")
+        view_df = edited_players.copy()
+        view_df["Note Globale"] = view_df.apply(calculate_global_score, axis=1)
+        st.dataframe(view_df[["Nom du Joueur", "Note Globale"]], hide_index=True, use_container_width=True)
+
+        btn_save_bottom = st.button("💾 Enregistrer les modifications", type="primary", key="save_btn_bottom")
+
+        if btn_save_top or btn_save_bottom:
+            st.session_state.players_df = edited_players
+            save_data(edited_players)
+            st.session_state.db_editor_version += 1
+            st.success("✅ Fichier Excel sauvegardé et synchronisé sur GitHub !")
+            st.rerun()
+
+        st.write("---")
+
+        st.subheader("📥 / 📤 Import & Export de la Base Excel")
+        col_dl, col_ul = st.columns(2)
+        
+        with col_dl:
+            st.markdown("**1. Télécharger la BDD actuelle**")
+            excel_buffer = io.BytesIO()
+            
+            export_df = st.session_state.players_df.copy()
+            if "Note Globale" in export_df.columns:
+                export_df = export_df.drop(columns=["Note Globale"])
+            if "is_joker" in export_df.columns:
+                export_df = export_df.drop(columns=["is_joker"])
+                
+            export_df.to_excel(excel_buffer, index=False)
+            excel_buffer.seek(0)
+            
+            st.download_button(
+                label="💾 Télécharger database_joueurs_v2.xlsx",
+                data=excel_buffer,
+                file_name="database_joueurs_v2.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+            if os.path.exists(BACKUP_FILE):
+                with open(BACKUP_FILE, "rb") as f_b:
+                    backup_data = f_b.read()
+                st.download_button(
+                    label="💾 Télécharger la version Backup (.xlsx)",
+                    data=backup_data,
+                    file_name="database_joueurs_v2_backup.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+        with col_ul:
+            st.markdown("**2. Remplacer avec un fichier Excel modifié**")
+            uploaded_file = st.file_uploader("Importer une nouvelle base (.xlsx)", type=["xlsx"], key="up_p")
+            if uploaded_file is not None:
+                try:
+                    new_df = pd.read_excel(uploaded_file)
+                    required_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif"]
+                    if all(col in new_df.columns for col in required_cols):
+                        if "Surnoms" not in new_df.columns:
+                            new_df["Surnoms"] = ""
+                        new_df["Surnoms"] = new_df["Surnoms"].fillna("").astype(str)
+                        
+                        if "Note Globale" in new_df.columns:
+                            new_df = new_df.drop(columns=["Note Globale"])
+                        if "is_joker" in new_df.columns:
+                            new_df = new_df.drop(columns=["is_joker"])
+                            
+                        for col in ["Attaque", "Défense", "Gardien", "Collectif"]:
+                            new_df[col] = new_df[col].apply(text_to_score)
+                            
+                        save_data(new_df)
+                        st.session_state.players_df = new_df
+                        st.session_state.db_editor_version += 1
+                        st.success("✅ Base mise à jour et envoyée sur GitHub !")
+                        st.rerun()
+                    else:
+                        st.error("Le fichier importé doit contenir au moins les colonnes : Nom du Joueur, Attaque, Défense, Gardien, Collectif")
+                except Exception as e:
+                    st.error(f"Erreur lors de la lecture du fichier Excel : {e}")
+
+    # --- SOUS-ONGLET 2 : JOKERS ---
+    with subtab_jokers:
+        col_add_j, col_del_j = st.columns(2)
+        
+        with col_add_j:
+            with st.expander("➕ Ajouter un Joker à la Base", expanded=False):
+                with st.form("form_add_new_joker_db"):
+                    new_j_name = st.text_input("Nom du Joker *")
+                    all_hosts = sorted(st.session_state.players_df["Nom du Joueur"].dropna().unique().tolist())
+                    new_j_host = st.selectbox("Joueur Rattaché (Hôte)", options=all_hosts if all_hosts else ["Aucun"])
+                    new_j_score = st.selectbox("Note Globale (1-10)", options=NUMERIC_OPTIONS, index=4)
+                    
+                    btn_confirm_add_j = st.form_submit_button("➕ Valider l'ajout du joker", type="primary")
+                    
+                    if btn_confirm_add_j:
+                        if not new_j_name.strip():
+                            st.error("Veuillez saisir un nom de joker.")
+                        else:
+                            clean_j_name = new_j_name.strip()
+                            num_s = text_to_score(new_j_score)
+                            new_j_row = pd.DataFrame([{
+                                "Nom Joker": clean_j_name,
+                                "Joueur Rattaché": new_j_host,
+                                "Note Globale": num_s,
+                                "Attaque": num_s,
+                                "Défense": num_s,
+                                "Gardien": 1,
+                                "Collectif": num_s
+                            }])
+                            st.session_state.jokers_db = pd.concat([st.session_state.jokers_db, new_j_row], ignore_index=True)
+                            save_jokers_db(st.session_state.jokers_db)
+                            st.session_state.jokers_editor_version += 1
+                            st.session_state.jokers_db = load_jokers_db()
+                            st.success(f"Joker '{clean_j_name}' ajouté (Gardien = 1) et synchronisé sur GitHub !")
+                            st.rerun()
+
+        with col_del_j:
+            with st.expander("❌ Supprimer un Joker de la Base", expanded=False):
+                existing_j_names = sorted(st.session_state.jokers_db["Nom Joker"].dropna().unique().tolist()) if not st.session_state.jokers_db.empty else []
+                if existing_j_names:
+                    j_to_del = st.selectbox("Choisir le joker à supprimer :", options=existing_j_names, key="sel_del_j")
+                    if st.button("🗑️ Confirmer la suppression", type="secondary", key="btn_del_j"):
+                        st.session_state.jokers_db = st.session_state.jokers_db[st.session_state.jokers_db["Nom Joker"] != j_to_del].reset_index(drop=True)
+                        save_jokers_db(st.session_state.jokers_db)
+                        st.session_state.jokers_editor_version += 1
+                        st.session_state.jokers_db = load_jokers_db()
+                        st.success(f"Joker '{j_to_del}' supprimé et synchronisé sur GitHub !")
+                        st.rerun()
+                else:
+                    st.info("Aucun joker dans la base.")
+
+        st.markdown("---")
+
+        col_exp_j, col_imp_j = st.columns(2)
+        with col_exp_j:
+            st.markdown("**📥 Exporter la base Jokers**")
+            output_buffer_j = io.BytesIO()
+            with pd.ExcelWriter(output_buffer_j, engine='openpyxl') as writer:
+                st.session_state.jokers_db.to_excel(writer, index=False)
+            output_buffer_j.seek(0)
+            
+            st.download_button(
+                label="⬇️ Télécharger la base Jokers (.xlsx)",
+                data=output_buffer_j,
+                file_name="database_jokers.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        with col_imp_j:
+            st.markdown("**📤 Importer un fichier Excel Jokers**")
+            uploaded_j_file = st.file_uploader("Charger un fichier database_jokers.xlsx", type=["xlsx"], key="up_jokers")
+            if uploaded_j_file is not None:
+                try:
+                    new_j_df = pd.read_excel(uploaded_j_file)
+                    save_jokers_db(new_j_df)
+                    st.session_state.jokers_editor_version += 1
+                    st.session_state.jokers_db = load_jokers_db()
+                    st.success("✅ Base Jokers mise à jour et envoyée sur GitHub !")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur lors de la lecture du fichier : {e}")
+
+        st.markdown("---")
+        st.markdown("**📋 Base de données enregistrée des Jokers :**")
+        edited_jokers_df = st.data_editor(
+            st.session_state.jokers_db,
+            num_rows="dynamic",
+            column_config={
+                "Joueur Rattaché": st.column_config.SelectboxColumn("Joueur Rattaché", options=st.session_state.players_df["Nom du Joueur"].tolist()),
+                "Note Globale": st.column_config.SelectboxColumn("Note Globale", options=NUMERIC_OPTIONS, default=5),
+                "Attaque": st.column_config.SelectboxColumn("Attaque", options=NUMERIC_OPTIONS, default=5),
+                "Défense": st.column_config.SelectboxColumn("Défense", options=NUMERIC_OPTIONS, default=5),
+                "Gardien": st.column_config.SelectboxColumn("Gardien", options=NUMERIC_OPTIONS, default=1),
+                "Collectif": st.column_config.SelectboxColumn("Collectif", options=NUMERIC_OPTIONS, default=5),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key=f"editor_jokers_{st.session_state.jokers_editor_version}"
+        )
+        
+        if st.button("💾 Enregistrer la base des Jokers", type="primary", key="btn_save_jokers_db"):
+            save_jokers_db(edited_jokers_df)
+            st.session_state.jokers_editor_version += 1
+            st.session_state.jokers_db = load_jokers_db()
+            st.success("Base des Jokers sauvegardée et synchronisée sur GitHub !")
+            st.rerun()
