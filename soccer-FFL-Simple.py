@@ -612,7 +612,7 @@ def show_teams_popup(t1, t2):
     fig_combined.savefig(buf, format="png", bbox_inches='tight', dpi=250, facecolor='#226343')
     buf.seek(0)
     
-    st.download_button(label="📸 Télécharger l'image (PNG)", data=buf, file_name="Compositions_FFL.png", mime="image/png", type="primary")
+    st.download_button(label="📸 Télécharger l'image (PNG)", data=buf, file_name="Compositions_FFL.png", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     st.write("---")
     
     text_whatsapp = "⚽ *COMPOSITIONS DU MATCH* ⚽\n\n"
@@ -1174,7 +1174,8 @@ with tab_hist:
             label="💾 Télécharger database_historique.xlsx",
             data=output_hist,
             file_name="database_historique.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
         )
 
 # ==========================================
@@ -1183,7 +1184,7 @@ with tab_hist:
 with tab_font:
     st.header("🎨 Sélection & Gestion de la Police des Cartes")
 
-    # CSS spécifique pour forcer les 3 colonnes de prévisualisation à rester côte à côte sur mobile
+    # CSS spécifique pour forcer les 3 colonnes de prévisualisation à rester côte à côte et limiter la taille max des images
     st.markdown(
         """
         <style>
@@ -1191,12 +1192,18 @@ with tab_font:
             display: flex !important;
             flex-direction: row !important;
             flex-wrap: nowrap !important;
-            gap: 8px !important;
+            gap: 6px !important;
         }
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) > div[data-testid="stColumn"] {
             width: 33.33% !important;
             min-width: 0 !important;
             flex: 1 1 33.33% !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) img {
+            max-width: 100px !important;
+            height: auto !important;
+            display: block !important;
+            margin: 0 auto !important;
         }
         </style>
         """,
@@ -1474,7 +1481,8 @@ with tab2:
                 label="💾 Télécharger database_joueurs_v2.xlsx",
                 data=excel_buffer,
                 file_name="database_joueurs_v2.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
             )
 
             if os.path.exists(BACKUP_FILE):
@@ -1484,7 +1492,8 @@ with tab2:
                     label="💾 Télécharger la version Backup (.xlsx)",
                     data=backup_data,
                     file_name="database_joueurs_v2_backup.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
                 )
             
         with col_ul:
@@ -1582,7 +1591,8 @@ with tab2:
                 label="⬇️ Télécharger la base Jokers (.xlsx)",
                 data=output_buffer_j,
                 file_name="database_jokers.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
             )
 
         with col_imp_j:
