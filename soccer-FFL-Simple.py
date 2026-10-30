@@ -1184,7 +1184,7 @@ with tab_hist:
 with tab_font:
     st.header("🎨 Sélection & Gestion de la Police des Cartes")
 
-    # CSS pour forcer l'affichage côte à côte et empêcher l'étirement des images
+# CSS pour forcer l'affichage côte à côte et adapter la taille en portrait vs paysage
     st.markdown(
         """
         <style>
@@ -1192,7 +1192,7 @@ with tab_font:
             display: flex !important;
             flex-direction: row !important;
             flex-wrap: nowrap !important;
-            gap: 10px !important;
+            gap: 6px !important;
         }
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) > div[data-testid="stColumn"] {
             width: 33.33% !important;
@@ -1206,6 +1206,12 @@ with tab_font:
             object-fit: contain !important;
             display: block !important;
             margin: 0 auto !important;
+        }
+        /* Réduction spécifique pour les écrans étroits en mode portrait */
+        @media (max-width: 768px) {
+            div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) img {
+                max-width: 75px !important;
+            }
         }
         </style>
         """,
