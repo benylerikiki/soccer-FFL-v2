@@ -1184,7 +1184,7 @@ with tab_hist:
 with tab_font:
     st.header("🎨 Sélection & Gestion de la Police des Cartes")
 
-    # CSS spécifique pour forcer les 3 colonnes de prévisualisation à rester côte à côte et fixer la taille des images à 50px
+    # CSS pour forcer l'affichage côte à côte en 3 colonnes égales
     st.markdown(
         """
         <style>
@@ -1192,19 +1192,12 @@ with tab_font:
             display: flex !important;
             flex-direction: row !important;
             flex-wrap: nowrap !important;
-            gap: 4px !important;
+            gap: 10px !important;
         }
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) > div[data-testid="stColumn"] {
             width: 33.33% !important;
             min-width: 0 !important;
             flex: 1 1 33.33% !important;
-        }
-        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) img {
-            width: 50px !important;
-            max-width: 50px !important;
-            height: auto !important;
-            display: block !important;
-            margin: 0 auto !important;
         }
         </style>
         """,
@@ -1259,7 +1252,7 @@ with tab_font:
                 with open(target_font_path, "wb") as f:
                     f.write(font_bytes)
                 
-                push_file_to_github(target_font_path, font_bytes, f"Ajout police {font_filename}")
+                push_file_to_github(target_path, font_bytes, f"Ajout police {font_filename}")
                 st.session_state['active_font_path'] = target_font_path
                 st.success(f"✅ Police **{font_filename}** ajoutée et sélectionnée avec succès !")
                 st.rerun()
@@ -1267,7 +1260,6 @@ with tab_font:
     with col_f2:
         st.subheader("👁️ Prévisualisation multi-cartes")
         
-        # Récupération de tous les noms
         regular_names = sorted(st.session_state.players_df["Nom du Joueur"].dropna().unique().tolist()) if not st.session_state.players_df.empty else []
         jokers_names = sorted([f"Joker {n}" for n in st.session_state.jokers_db["Nom Joker"].dropna().unique().tolist()]) if not st.session_state.jokers_db.empty and "Nom Joker" in st.session_state.jokers_db.columns else []
         
@@ -1297,7 +1289,13 @@ with tab_font:
                 if os.path.exists(card_file_path):
                     prev_img = create_player_card(card_file_path, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
                     if prev_img:
-                        st.image(prev_img, use_container_width=True)
+                        # Redimensionnement direct de l'image PIL en Python (ex: largeur max 250 pixels) pour forcer une petite taille propre
+                        basewidth = 250
+                        wpercent = (basewidth / float(prev_img.size[0]))
+                        hsize = int(float(prev_img.size[1]) * float(wpercent))
+                        prev_img_resized = prev_img.resize((basewidth, hsize), Image.Resampling.LANCZOS)
+                        
+                        st.image(prev_img_resized, use_container_width=True)
                     else:
                         st.warning("Erreur lors du rendu.")
                 else:
