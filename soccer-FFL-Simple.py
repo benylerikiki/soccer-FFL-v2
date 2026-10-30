@@ -864,7 +864,7 @@ with tab1:
                 new_clean_name = st.text_input("Nom officiel pour la BDD", value=current_unknown)
                 att_l = st.selectbox("Attaque", options=NUMERIC_OPTIONS, index=4)
                 def_l = st.selectbox("Défense", options=NUMERIC_OPTIONS, index=4)
-                gk_l  = st.selectbox("Gardien", options=NUMERIC_OPTIONS, index=0)  # Défaut 1
+                gk_l  = st.selectbox("Gardien", options=NUMERIC_OPTIONS, index=0)
                 col_l = st.selectbox("Collectif", options=NUMERIC_OPTIONS, index=4)
                 
                 if st.form_submit_button("💾 Enregistrer et Cocher"):
@@ -1192,7 +1192,7 @@ with tab_font:
 
     available_fonts = sorted(list(set(available_fonts)))
 
-    col_f1, col_f2 = st.columns([3, 2])
+    col_f1, col_f2 = st.columns([1, 2])
 
     with col_f1:
         st.subheader("1. Sélection de la police active")
@@ -1237,9 +1237,9 @@ with tab_font:
                 st.rerun()
 
     with col_f2:
-        st.subheader("👁️ Prévisualisation")
+        st.subheader("👁️ Prévisualisation multi-cartes")
         
-        # Récupération de tous les noms (Joueurs réguliers + Jokers)
+        # Récupération de tous les noms
         regular_names = sorted(st.session_state.players_df["Nom du Joueur"].dropna().unique().tolist()) if not st.session_state.players_df.empty else []
         jokers_names = sorted([f"Joker {n}" for n in st.session_state.jokers_db["Nom Joker"].dropna().unique().tolist()]) if not st.session_state.jokers_db.empty and "Nom Joker" in st.session_state.jokers_db.columns else []
         
@@ -1256,16 +1256,24 @@ with tab_font:
         preview_font_filename = st.session_state.get("selectbox_font_choice", os.path.basename(st.session_state.get('active_font_path', DEFAULT_FONT_PATH)))
         preview_font_path = os.path.join(FONTS_DIR, preview_font_filename) if os.path.exists(os.path.join(FONTS_DIR, preview_font_filename)) else preview_font_filename
 
-        card_bg = BLUE_CARD_PATH if os.path.exists(BLUE_CARD_PATH) else (RED_CARD_PATH if os.path.exists(RED_CARD_PATH) else None)
+        cards_to_preview = [
+            ("🔵 Équipe 1 (Bleu)", BLUE_CARD_PATH),
+            ("🔴 Équipe 2 (Rouge)", RED_CARD_PATH),
+            ("🃏 Joker (Jaune)", YELLOW_CARD_PATH)
+        ]
 
-        if card_bg:
-            preview_card_img = create_player_card(card_bg, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
-            if preview_card_img:
-                st.image(preview_card_img, caption=f"Rendu de '{preview_player_name}' avec {preview_font_filename}", width=200)
-            else:
-                st.warning("Impossible d'effectuer le rendu de l'image.")
-        else:
-            st.info("Image de carte par défaut (`card_blue.png`) introuvable pour la prévisualisation.")
+        cols_prev = st.columns(3)
+        for idx_card, (card_label, card_file_path) in enumerate(cards_to_preview):
+            with cols_prev[idx_card]:
+                st.caption(f"**{card_label}**")
+                if os.path.exists(card_file_path):
+                    prev_img = create_player_card(card_file_path, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
+                    if prev_img:
+                        st.image(prev_img, use_container_width=True)
+                    else:
+                        st.warning("Erreur lors du rendu.")
+                else:
+                    st.info(f"`{card_file_path}` introuvable.")
 
 # ==========================================
 # 🏃 TAB 2 : GESTION DES BASES (JOUEURS, JOKERS & CARTES FUT)
