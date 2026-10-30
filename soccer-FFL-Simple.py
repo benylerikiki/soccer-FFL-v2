@@ -49,7 +49,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- GESTION DE L'ÉTApE DE LANDING VIA QUERY PARAMS ET SESSION ---
+# --- GESTION DE L'ÉTAPe DE LANDING VIA QUERY PARAMS ET SESSION ---
 if "enter" in st.query_params:
     st.session_state['show_landing'] = False
 
@@ -257,7 +257,7 @@ def text_to_score(val):
 def calculate_global_score(row):
     att = text_to_score(row.get("Attaque", 5))
     defe = text_to_score(row.get("Défense", 5))
-    gk = text_to_score(row.get("Gardien", 5))
+    gk = text_to_score(row.get("Gardien", 1))
     col = text_to_score(row.get("Collectif", 5))
     avg = (att + defe + gk + col) / 4.0
     return round(avg, 1)
@@ -270,7 +270,7 @@ def load_data():
             if "Surnoms" not in df.columns:
                 df["Surnoms"] = ""
             if "Gardien" not in df.columns:
-                df["Gardien"] = 5
+                df["Gardien"] = 1
                 
             df["Surnoms"] = df["Surnoms"].fillna("").astype(str)
             
@@ -278,7 +278,7 @@ def load_data():
                 if col in df.columns:
                     df[col] = df[col].apply(text_to_score)
                 else:
-                    df[col] = 5
+                    df[col] = 1 if col == "Gardien" else 5
                     
             ordered_cols = ["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Surnoms"]
             existing = [c for c in ordered_cols if c in df.columns]
@@ -290,7 +290,7 @@ def load_data():
         "Nom du Joueur": ["Antho", "Cyril V", "Apou", "Benoit", "Nico P", "Mouyss", "Cédric", "Nico M", "David", "Cyril L"],
         "Attaque": [9, 5, 7, 9, 5, 7, 3, 7, 5, 3],
         "Défense": [5, 9, 5, 3, 9, 3, 9, 5, 7, 7],
-        "Gardien": [3, 5, 7, 3, 7, 5, 9, 3, 5, 5],
+        "Gardien": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
         "Collectif": [7, 9, 7, 5, 7, 5, 7, 5, 5, 5],
         "Surnoms": ["", "Cyril", "", "beny", "nicop, nico", "mouys", "", "nicom, nico", "Dav, dimeh", "Cyril"]
     })
@@ -426,7 +426,6 @@ if st.session_state.get('show_landing', True):
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
-        # Bloc HTML contenant à la fois l'image et le bouton vert parfaitement scellés
         st.markdown(
             f"""
             <div class="landing-card-container">
@@ -832,7 +831,7 @@ with tab1:
                     "Nom du Joueur": final_name,
                     "Attaque": text_to_score(jk_data.get("Attaque", 5)),
                     "Défense": text_to_score(jk_data.get("Défense", 5)),
-                    "Gardien": text_to_score(jk_data.get("Gardien", 5)),
+                    "Gardien": text_to_score(jk_data.get("Gardien", 1)),
                     "Collectif": text_to_score(jk_data.get("Collectif", 5)),
                     "Surnoms": "",
                     "is_joker": True
@@ -865,7 +864,7 @@ with tab1:
                 new_clean_name = st.text_input("Nom officiel pour la BDD", value=current_unknown)
                 att_l = st.selectbox("Attaque", options=NUMERIC_OPTIONS, index=4)
                 def_l = st.selectbox("Défense", options=NUMERIC_OPTIONS, index=4)
-                gk_l  = st.selectbox("Gardien", options=NUMERIC_OPTIONS, index=4)
+                gk_l  = st.selectbox("Gardien", options=NUMERIC_OPTIONS, index=0)  # Défaut 1
                 col_l = st.selectbox("Collectif", options=NUMERIC_OPTIONS, index=4)
                 
                 if st.form_submit_button("💾 Enregistrer et Cocher"):
@@ -962,7 +961,7 @@ with tab1:
                             "Nom du Joueur": f"Joker {chosen_jk_name}" if not chosen_jk_name.startswith("Joker") else chosen_jk_name,
                             "Attaque": text_to_score(jk_data.get("Attaque", 5)),
                             "Défense": text_to_score(jk_data.get("Défense", 5)),
-                            "Gardien": text_to_score(jk_data.get("Gardien", 5)),
+                            "Gardien": text_to_score(jk_data.get("Gardien", 1)),
                             "Collectif": text_to_score(jk_data.get("Collectif", 5)),
                             "Surnoms": "",
                             "is_joker": True
@@ -976,7 +975,7 @@ with tab1:
                     with c_n:
                         new_jk_name = st.text_input("Prénom du Joker", value=f"Joker {nb_jokers + 1}")
                     with c_s:
-                        new_jk_score = st.number_input("Note Globale (1-10)", min_value=1, max_value=10, value=5)
+                        new_jk_score = st.number_input("Note Globale Champ Champ (1-10)", min_value=1, max_value=10, value=5)
                     with c_save:
                         save_to_db_chk = st.checkbox("Enregistrer aussi dans la BDD Jokers", value=True)
                     
@@ -990,7 +989,7 @@ with tab1:
                                 "Nom du Joueur": final_name,
                                 "Attaque": num_s,
                                 "Défense": num_s,
-                                "Gardien": num_s,
+                                "Gardien": 1,  # Note de gardien toujours forcée à 1
                                 "Collectif": num_s,
                                 "Surnoms": "",
                                 "is_joker": True
@@ -1003,7 +1002,7 @@ with tab1:
                                     "Note Globale": num_s,
                                     "Attaque": num_s,
                                     "Défense": num_s,
-                                    "Gardien": num_s,
+                                    "Gardien": 1,  # Forcée à 1 dans la BDD Jokers
                                     "Collectif": num_s
                                 }])
                                 st.session_state.jokers_db = pd.concat([st.session_state.jokers_db, new_entry], ignore_index=True)
@@ -1273,7 +1272,7 @@ with tab2:
                     name = st.text_input("Nom / Pseudo du joueur")
                     att_label = st.selectbox("Niveau en Attaque (1-10)", options=NUMERIC_OPTIONS, index=4)
                     def_label = st.selectbox("Niveau en Défense (1-10)", options=NUMERIC_OPTIONS, index=4)
-                    gk_label  = st.selectbox("Niveau en Gardien (1-10)", options=NUMERIC_OPTIONS, index=4)
+                    gk_label  = st.selectbox("Niveau en Gardien (1-10)", options=NUMERIC_OPTIONS, index=0)  # Défaut 1
                     col_label = st.selectbox("Niveau en Collectif (1-10)", options=NUMERIC_OPTIONS, index=4)
                     surnames = st.text_input("Surnoms séparés par des virgules (Optionnel)", placeholder="ex: Nico, Nick")
                     
@@ -1496,20 +1495,21 @@ with tab2:
                             st.error("Veuillez saisir un nom de joker.")
                         else:
                             clean_j_name = new_j_name.strip()
+                            num_s = text_to_score(new_j_score)
                             new_j_row = pd.DataFrame([{
                                 "Nom Joker": clean_j_name,
                                 "Joueur Rattaché": new_j_host,
-                                "Note Globale": new_j_score,
-                                "Attaque": new_j_score,
-                                "Défense": new_j_score,
-                                "Gardien": new_j_score,
-                                "Collectif": new_j_score
+                                "Note Globale": num_s,
+                                "Attaque": num_s,
+                                "Défense": num_s,
+                                "Gardien": 1,  # Toujours 1 par défaut pour le gardien
+                                "Collectif": num_s
                             }])
                             st.session_state.jokers_db = pd.concat([st.session_state.jokers_db, new_j_row], ignore_index=True)
                             save_jokers_db(st.session_state.jokers_db)
                             st.session_state.jokers_editor_version += 1
                             st.session_state.jokers_db = load_jokers_db()
-                            st.success(f"Joker '{clean_j_name}' ajouté et synchronisé sur GitHub !")
+                            st.success(f"Joker '{clean_j_name}' ajouté (Gardien = 1) et synchronisé sur GitHub !")
                             st.rerun()
 
         with col_del_j:
@@ -1568,7 +1568,7 @@ with tab2:
                 "Note Globale": st.column_config.SelectboxColumn("Note Globale", options=NUMERIC_OPTIONS, default=5),
                 "Attaque": st.column_config.SelectboxColumn("Attaque", options=NUMERIC_OPTIONS, default=5),
                 "Défense": st.column_config.SelectboxColumn("Défense", options=NUMERIC_OPTIONS, default=5),
-                "Gardien": st.column_config.SelectboxColumn("Gardien", options=NUMERIC_OPTIONS, default=5),
+                "Gardien": st.column_config.SelectboxColumn("Gardien", options=NUMERIC_OPTIONS, default=1), # Défaut à 1
                 "Collectif": st.column_config.SelectboxColumn("Collectif", options=NUMERIC_OPTIONS, default=5),
             },
             hide_index=True,
