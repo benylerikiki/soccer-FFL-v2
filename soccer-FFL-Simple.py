@@ -1183,6 +1183,26 @@ with tab_hist:
 with tab_font:
     st.header("🎨 Sélection & Gestion de la Police des Cartes")
 
+    # CSS spécifique pour forcer les 3 colonnes de prévisualisation à rester côte à côte sur mobile
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            gap: 8px !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) > div[data-testid="stColumn"] {
+            width: 33.33% !important;
+            min-width: 0 !important;
+            flex: 1 1 33.33% !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
     available_fonts = []
     if os.path.exists(FONTS_DIR):
         available_fonts = [f for f in os.listdir(FONTS_DIR) if f.lower().endswith(('.otf', '.ttf'))]
@@ -1269,7 +1289,7 @@ with tab_font:
                 if os.path.exists(card_file_path):
                     prev_img = create_player_card(card_file_path, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
                     if prev_img:
-                        st.image(prev_img, width=140)
+                        st.image(prev_img, use_container_width=True)
                     else:
                         st.warning("Erreur lors du rendu.")
                 else:
