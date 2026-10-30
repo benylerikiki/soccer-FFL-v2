@@ -49,7 +49,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS & STYLES (BOUTON AJUSTÉ SOUS L'IMAGE) ---
+# --- 2. CSS & STYLES (ALIGNEMENT PARFAIT IMAGE ET BOUTON) ---
 if os.path.exists(LOGO_PATH):
     with open(LOGO_PATH, "rb") as f:
         icon_bytes = f.read()
@@ -92,30 +92,30 @@ st.markdown(
         }
     }
 
-    /* CONTENEUR GLOBAL CENTRÉ POUR L'IMAGE ET SON BOUTON */
-    .landing-wrapper {
+    /* CONTENEUR BLOC UNIQUE IMAGE + BOUTON */
+    .landing-card {
         width: 100%;
-        max-width: 900px;
         margin: 0 auto;
         display: flex;
         flex-direction: column;
-        align-items: center;
+        align-items: stretch;
     }
 
     .landing-img-styled {
         width: 100%;
-        max-height: 75vh;
+        height: auto;
+        max-height: 70vh;
         object-fit: contain;
         border-radius: 16px 16px 0 0;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.5);
         display: block;
     }
 
-    /* STYLE DU BOUTON SOUS L'IMAGE (MEME LARGEUR EXACTE) */
+    /* LE BOUTON SOUS L'IMAGE : PREND EXACTEMENT 100% DU BLOC */
     div[data-testid="stElementContainer"]:has(button[key="btn_enter_kompo"]) {
         width: 100% !important;
-        max-width: 900px !important;
-        margin: 0 auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
 
     button[key="btn_enter_kompo"] {
@@ -413,7 +413,7 @@ if 'jokers_db' not in st.session_state:
     st.session_state.jokers_db = load_jokers_db()
 
 # ==========================================
-# 🖼️ PAGE DE GARDE (IMAGE + BOUTON LARGEUR ÉGALE)
+# 🖼️ PAGE DE GARDE (IMAGE + BOUTON EN BLOC PARFAITEMENT CENTRÉ)
 # ==========================================
 if st.session_state.get('show_landing', True):
     if os.path.exists(IMAGE_PATH):
@@ -421,20 +421,22 @@ if st.session_state.get('show_landing', True):
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
-        # Image dans le conteneur stylisé
-        st.markdown(
-            f"""
-            <div class="landing-wrapper">
-                <img class="landing-img-styled" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
+        # Centrage parfait via les colonnes Streamlit
+        col_left, col_center, col_right = st.columns([1, 2, 1])
         
-        # Bouton situé juste en dessous qui épousera exactement la largeur de l'image
-        if st.button("Entrez faire votre Kompo ⚽", key="btn_enter_kompo"):
-            st.session_state['show_landing'] = False
-            st.rerun()
+        with col_center:
+            st.markdown(
+                f"""
+                <div class="landing-card">
+                    <img class="landing-img-styled" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+            
+            if st.button("Entrez faire votre Kompo ⚽", key="btn_enter_kompo"):
+                st.session_state['show_landing'] = False
+                st.rerun()
     else:
         st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`).")
         if st.button("Entrez faire votre Kompo ⚽", key="btn_enter_kompo"):
