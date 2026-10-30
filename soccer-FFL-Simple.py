@@ -1290,20 +1290,14 @@ with tab_font:
             ("🃏 Joker (Jaune)", YELLOW_CARD_PATH)
         ]
 
-        cols_prev = st.columns(3)
+cols_prev = st.columns(3)
         for idx_card, (card_label, card_file_path) in enumerate(cards_to_preview):
             with cols_prev[idx_card]:
                 st.caption(f"**{card_label}**")
                 if os.path.exists(card_file_path):
                     prev_img = create_player_card(card_file_path, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
                     if prev_img:
-                        # Redimensionnement direct de l'image PIL en Python (ex: largeur max 250 pixels) pour forcer une petite taille propre
-                        basewidth = 50
-                        wpercent = (basewidth / float(prev_img.size[0]))
-                        hsize = int(float(prev_img.size[1]) * float(wpercent))
-                        prev_img_resized = prev_img.resize((basewidth, hsize), Image.Resampling.LANCZOS)
-                        
-                        st.image(prev_img_resized, use_container_width=True)
+                        st.image(prev_img, use_container_width=True)
                     else:
                         st.warning("Erreur lors du rendu.")
                 else:
