@@ -1184,7 +1184,7 @@ with tab_hist:
 with tab_font:
     st.header("🎨 Sélection & Gestion de la Police des Cartes")
 
-    # CSS spécifique pour forcer les 3 colonnes de prévisualisation à rester côte à côte et limiter la taille max des images
+    # CSS spécifique pour forcer les 3 colonnes de prévisualisation à rester côte à côte et fixer la taille des images à 50px
     st.markdown(
         """
         <style>
@@ -1192,7 +1192,7 @@ with tab_font:
             display: flex !important;
             flex-direction: row !important;
             flex-wrap: nowrap !important;
-            gap: 6px !important;
+            gap: 4px !important;
         }
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) > div[data-testid="stColumn"] {
             width: 33.33% !important;
@@ -1200,7 +1200,8 @@ with tab_font:
             flex: 1 1 33.33% !important;
         }
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) img {
-            max-width: 100px !important;
+            width: 50px !important;
+            max-width: 50px !important;
             height: auto !important;
             display: block !important;
             margin: 0 auto !important;
