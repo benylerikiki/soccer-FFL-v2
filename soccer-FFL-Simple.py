@@ -49,7 +49,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS & STYLES (IMAGE CLIQUABLE PROPRE EN OVERLAY) ---
+# --- 2. CSS & STYLES (BOUTON AJUSTÉ SOUS L'IMAGE) ---
 if os.path.exists(LOGO_PATH):
     with open(LOGO_PATH, "rb") as f:
         icon_bytes = f.read()
@@ -92,48 +92,53 @@ st.markdown(
         }
     }
 
-    /* CONTENEUR ET DÉCORATION DE L'IMAGE CLIQUABLE */
-    .landing-container {
-        position: relative;
+    /* CONTENEUR GLOBAL CENTRÉ POUR L'IMAGE ET SON BOUTON */
+    .landing-wrapper {
         width: 100%;
         max-width: 900px;
         margin: 0 auto;
         display: flex;
-        justify-content: center;
+        flex-direction: column;
+        align-items: center;
     }
 
     .landing-img-styled {
         width: 100%;
-        max-height: 80vh;
+        max-height: 75vh;
         object-fit: contain;
-        border-radius: 16px;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.6);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border-radius: 16px 16px 0 0;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+        display: block;
     }
 
-    /* LE BOUTON INVISIBLE SUPERPOSÉ SUR TOUTE L'IMAGE */
-    div[data-testid="stElementContainer"]:has(button[key="img_click_btn"]) {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
+    /* STYLE DU BOUTON SOUS L'IMAGE (MEME LARGEUR EXACTE) */
+    div[data-testid="stElementContainer"]:has(button[key="btn_enter_kompo"]) {
         width: 100% !important;
-        height: 100% !important;
-        z-index: 99 !important;
+        max-width: 900px !important;
+        margin: 0 auto !important;
     }
 
-    button[key="img_click_btn"] {
+    button[key="btn_enter_kompo"] {
         width: 100% !important;
-        height: 100% !important;
-        background: transparent !important;
+        background-color: #28a745 !important;
+        color: white !important;
+        font-size: 18px !important;
+        font-weight: bold !important;
+        padding: 14px 20px !important;
         border: none !important;
-        color: transparent !important;
+        border-radius: 0 0 16px 16px !important;
+        box-shadow: 0 8px 25px rgba(40, 167, 69, 0.4) !important;
         cursor: pointer !important;
+        transition: background-color 0.2s ease, transform 0.1s ease !important;
     }
 
-    button[key="img_click_btn"]:hover + img, 
-    .landing-container:hover img {
-        transform: scale(1.015);
-        box-shadow: 0 12px 35px rgba(40, 167, 69, 0.5);
+    button[key="btn_enter_kompo"]:hover {
+        background-color: #218838 !important;
+        box-shadow: 0 10px 30px rgba(40, 167, 69, 0.6) !important;
+    }
+
+    button[key="btn_enter_kompo"]:active {
+        transform: scale(0.99) !important;
     }
     </style>
     """,
@@ -408,7 +413,7 @@ if 'jokers_db' not in st.session_state:
     st.session_state.jokers_db = load_jokers_db()
 
 # ==========================================
-# 🖼️ PAGE DE GARDE (IMAGE CLIQUABLE CORRIGÉE)
+# 🖼️ PAGE DE GARDE (IMAGE + BOUTON LARGEUR ÉGALE)
 # ==========================================
 if st.session_state.get('show_landing', True):
     if os.path.exists(IMAGE_PATH):
@@ -416,25 +421,23 @@ if st.session_state.get('show_landing', True):
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
-        # Rendu visuel propre de l'image
+        # Image dans le conteneur stylisé
         st.markdown(
             f"""
-            <div class="landing-container">
+            <div class="landing-wrapper">
                 <img class="landing-img-styled" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
             </div>
             """, 
             unsafe_allow_html=True
         )
         
-        # Bouton overlay invisible par-dessus l'image
-        if st.button(" ", key="img_click_btn"):
+        # Bouton situé juste en dessous qui épousera exactement la largeur de l'image
+        if st.button("Entrez faire votre Kompo ⚽", key="btn_enter_kompo"):
             st.session_state['show_landing'] = False
             st.rerun()
-
-        st.markdown("<p style='text-align: center; color: #888; margin-top: 15px;'>👆 Cliquez sur l'image pour accéder aux compositions</p>", unsafe_allow_html=True)
     else:
         st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`).")
-        if st.button("🚀 ENTRER DANS L'APPLICATION", type="primary"):
+        if st.button("Entrez faire votre Kompo ⚽", key="btn_enter_kompo"):
             st.session_state['show_landing'] = False
             st.rerun()
 
