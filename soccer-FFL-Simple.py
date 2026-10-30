@@ -49,7 +49,14 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS & STYLES (ALIGNEMENT PARFAIT IMAGE ET BOUTON) ---
+# --- GESTION DE L'ÉTApE DE LANDING VIA QUERY PARAMS ET SESSION ---
+if "enter" in st.query_params:
+    st.session_state['show_landing'] = False
+
+if 'show_landing' not in st.session_state:
+    st.session_state['show_landing'] = True
+
+# --- 2. CSS & STYLES (CARTE UNIQUE ET BOUTON SUR-MESURE) ---
 if os.path.exists(LOGO_PATH):
     with open(LOGO_PATH, "rb") as f:
         icon_bytes = f.read()
@@ -92,63 +99,61 @@ st.markdown(
         }
     }
 
-    /* CONTENEUR BLOC UNIQUE IMAGE + BOUTON */
-    .landing-card {
-        width: 100%;
-        margin: 0 auto;
+    /* CONTENEUR DE LA LANDING CARD (CENTRÉ ET TAILLE AJUSTÉE) */
+    .landing-card-container {
         display: flex;
-        flex-direction: column;
-        align-items: stretch;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        margin-top: 20px;
     }
 
-    .landing-img-styled {
+    .landing-card {
+        display: inline-flex;
+        flex-direction: column;
+        max-width: 650px;
+        width: 100%;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+        background-color: #1e1e1e;
+    }
+
+    .landing-card img {
         width: 100%;
         height: auto;
-        max-height: 70vh;
-        object-fit: contain;
-        border-radius: 16px 16px 0 0;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.5);
         display: block;
+        object-fit: contain;
     }
 
-    /* LE BOUTON SOUS L'IMAGE : PREND EXACTEMENT 100% DU BLOC */
-    div[data-testid="stElementContainer"]:has(button[key="btn_enter_kompo"]) {
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
-    button[key="btn_enter_kompo"] {
-        width: 100% !important;
-        background-color: #28a745 !important;
+    .landing-card a.landing-btn {
+        display: block;
+        width: 100%;
+        background-color: #28a745;
         color: white !important;
-        font-size: 18px !important;
-        font-weight: bold !important;
-        padding: 14px 20px !important;
-        border: none !important;
-        border-radius: 0 0 16px 16px !important;
-        box-shadow: 0 8px 25px rgba(40, 167, 69, 0.4) !important;
-        cursor: pointer !important;
-        transition: background-color 0.2s ease, transform 0.1s ease !important;
+        text-align: center;
+        font-size: 20px;
+        font-weight: bold;
+        padding: 16px 0;
+        text-decoration: none !important;
+        transition: background-color 0.2s ease, transform 0.1s ease;
+        box-sizing: border-box;
     }
 
-    button[key="btn_enter_kompo"]:hover {
-        background-color: #218838 !important;
-        box-shadow: 0 10px 30px rgba(40, 167, 69, 0.6) !important;
+    .landing-card a.landing-btn:hover {
+        background-color: #218838;
+        color: white !important;
     }
 
-    button[key="btn_enter_kompo"]:active {
-        transform: scale(0.99) !important;
+    .landing-card a.landing-btn:active {
+        transform: scale(0.99);
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# --- INITIALISATION DE L'ÉTAT ---
-if 'show_landing' not in st.session_state:
-    st.session_state['show_landing'] = True
-
+# --- INITIALISATION DES VARIABLES DE SESSION ---
 if 'db_editor_version' not in st.session_state:
     st.session_state['db_editor_version'] = 0
 
@@ -413,7 +418,7 @@ if 'jokers_db' not in st.session_state:
     st.session_state.jokers_db = load_jokers_db()
 
 # ==========================================
-# 🖼️ PAGE DE GARDE (IMAGE + BOUTON EN BLOC PARFAITEMENT CENTRÉ)
+# 🖼️ PAGE DE GARDE (BLOC HTML UNIQUE ET SCELLÉ)
 # ==========================================
 if st.session_state.get('show_landing', True):
     if os.path.exists(IMAGE_PATH):
@@ -421,25 +426,21 @@ if st.session_state.get('show_landing', True):
             img_bytes = f.read()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         
-        # Centrage parfait via les colonnes Streamlit
-        col_left, col_center, col_right = st.columns([1, 2, 1])
-        
-        with col_center:
-            st.markdown(
-                f"""
+        # Bloc HTML contenant à la fois l'image et le bouton vert parfaitement scellés
+        st.markdown(
+            f"""
+            <div class="landing-card-container">
                 <div class="landing-card">
-                    <img class="landing-img-styled" src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
+                    <img src="data:image/jpeg;base64,{img_b64}" alt="Soccer FFL Kompo Intro">
+                    <a class="landing-btn" href="?enter=true" target="_self">Entrez faire votre Kompo ⚽</a>
                 </div>
-                """, 
-                unsafe_allow_html=True
-            )
-            
-            if st.button("Entrez faire votre Kompo ⚽", key="btn_enter_kompo"):
-                st.session_state['show_landing'] = False
-                st.rerun()
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
     else:
         st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`).")
-        if st.button("Entrez faire votre Kompo ⚽", key="btn_enter_kompo"):
+        if st.button("Entrez faire votre Kompo ⚽", type="primary"):
             st.session_state['show_landing'] = False
             st.rerun()
 
@@ -687,6 +688,8 @@ with col_title:
     st.header("Soccer FFL Kompo")
 with col_home:
     if st.button("🏠 Accueil"):
+        if "enter" in st.query_params:
+            del st.query_params["enter"]
         st.session_state['show_landing'] = True
         st.rerun()
 
