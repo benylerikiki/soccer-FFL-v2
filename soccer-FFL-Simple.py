@@ -49,7 +49,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 2. CSS & STYLES (INCLUANT OPTION 1 : FAB FLOATING BUTTON) ---
+# --- 2. CSS & STYLES (IMAGE TOTALEMENT CLIQUABLE VIA OVERLAY) ---
 if os.path.exists(LOGO_PATH):
     with open(LOGO_PATH, "rb") as f:
         icon_bytes = f.read()
@@ -92,7 +92,7 @@ st.markdown(
         }
     }
 
-    /* CONTAINER LANDING PAGE WITH FAB */
+    /* CONTAINER ET DÉCORATION DE L'IMAGE CLIQUABLE */
     .landing-wrapper {
         position: relative;
         width: 100%;
@@ -100,6 +100,7 @@ st.markdown(
         margin: 0 auto;
         display: flex;
         justify-content: center;
+        cursor: pointer;
     }
     .landing-img {
         width: 100%;
@@ -107,36 +108,30 @@ st.markdown(
         object-fit: contain;
         border-radius: 16px;
         box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .landing-wrapper:hover .landing-img {
+        transform: scale(1.01);
+        box-shadow: 0 12px 35px rgba(40, 167, 69, 0.4);
     }
 
-    /* OPTION 1 : STYLISATION DU BOUTON FLOTTANT (FAB) */
-    div[data-testid="stElementContainer"]:has(button[key="fab_enter_btn"]) {
+    /* OVERLAY INVISIBLE TRANSFORMANT TOUTE L'IMAGE EN BOUTON */
+    div[data-testid="stElementContainer"]:has(button[key="img_click_btn"]) {
         position: absolute !important;
-        bottom: 25px !important;
-        left: 50% !important;
-        transform: translateX(-50%) !important;
-        z-index: 99 !important;
-        width: auto !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        z-index: 10 !important;
     }
 
-    button[key="fab_enter_btn"] {
-        background: linear-gradient(135deg, #1e7e34 0%, #28a745 100%) !important;
-        color: white !important;
-        font-size: 18px !important;
-        font-weight: bold !important;
-        padding: 14px 32px !important;
-        border-radius: 50px !important;
-        border: 2px solid rgba(255, 255, 255, 0.8) !important;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5) !important;
+    button[key="img_click_btn"] {
+        width: 100% !important;
+        height: 100% !important;
+        background: transparent !important;
+        border: none !important;
+        color: transparent !important;
         cursor: pointer !important;
-        transition: all 0.3s ease !important;
-        letter-spacing: 0.5px !important;
-    }
-
-    button[key="fab_enter_btn"]:hover {
-        transform: scale(1.05) !important;
-        box-shadow: 0 12px 30px rgba(40, 167, 69, 0.6) !important;
-        background: linear-gradient(135deg, #28a745 0%, #34ce57 100%) !important;
     }
     </style>
     """,
@@ -411,7 +406,7 @@ if 'jokers_db' not in st.session_state:
     st.session_state.jokers_db = load_jokers_db()
 
 # ==========================================
-# 🖼️ PAGE DE GARDE (OPTION 1 : FAB BUTTON)
+# 🖼️ PAGE DE GARDE (L'IMAGE EST LE BOUTON)
 # ==========================================
 if st.session_state.get('show_landing', True):
     if os.path.exists(IMAGE_PATH):
@@ -428,10 +423,12 @@ if st.session_state.get('show_landing', True):
             unsafe_allow_html=True
         )
         
-        # BOUTON FAB FLOATTANT PAR-DESSUS L'IMAGE
-        if st.button("⚽ ACCOMPLIR LES COMPOSITIONS", key="fab_enter_btn"):
+        # BOUTON OVERLAY TRANSPARENT SUR TOUTE L'IMAGE
+        if st.button("", key="img_click_btn"):
             st.session_state['show_landing'] = False
             st.rerun()
+
+        st.markdown("<p style='text-align: center; color: #888; margin-top: 15px;'>👆 Cliquez sur l'image pour accéder aux compositions</p>", unsafe_allow_html=True)
     else:
         st.warning(f"⚠️ Fichier d'image introuvable (`{IMAGE_PATH}`).")
         if st.button("🚀 ENTRER DANS L'APPLICATION", type="primary"):
