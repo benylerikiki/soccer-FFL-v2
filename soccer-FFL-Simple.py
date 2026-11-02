@@ -1073,7 +1073,7 @@ with tab1:
         j2 = st.selectbox("... à ne surtout pas faire jouer avec :", options=["Aucun"] + sorted(remaining_options), index=0, key="j2_all") if j1 != "Aucune restriction" else "Aucun"
 
     st.write("---")
-    st.subheader("4. Choix des Cartes pour ce Match")
+    st.subheader("4. Choix & Prévisualisation des Cartes pour ce Match")
     
     main_use_default_cards = st.checkbox("Utiliser les cartes globales configurées dans l'onglet 'Police & Cartes'", value=True, key="main_chk_default_cards")
     
@@ -1093,7 +1093,14 @@ with tab1:
                 gen = get_card_generation(c_path)
                 generations.setdefault(gen, []).append(c_path)
             selected_gen_main = st.selectbox("Série homogène :", options=list(generations.keys()), key="main_sel_gen")
-            if st.button("🎲 Tirer un pack aléatoire de cette génération", key="main_btn_rnd_gen"):
+            
+            # Gestion aléatoire persistante dans la session pour la prévisualisation en temps réel
+            if 'main_random_override' not in st.session_state:
+                import random
+                g_cards = generations[selected_gen_main]
+                st.session_state['main_random_override'] = {'t1': random.choice(g_cards), 't2': random.choice(g_cards), 'joker': random.choice(g_cards)}
+            
+            if st.button("🎲 Tirer un nouveau pack aléatoire de cette génération", key="main_btn_rnd_gen"):
                 import random
                 g_cards = generations[selected_gen_main]
                 st.session_state['main_random_override'] = {
@@ -1101,10 +1108,41 @@ with tab1:
                     't2': random.choice(g_cards),
                     'joker': random.choice(g_cards)
                 }
-                st.success(f"Pack aléatoire de la série **{selected_gen_main}** généré pour le match !")
+                st.rerun()
             main_override_cards = st.session_state.get('main_random_override', None)
+    else:
+        # Si on utilise les cartes par défaut
+        main_override_cards = {
+            't1': st.session_state.get('global_card_t1', 'card_blue.png'),
+            't2': st.session_state.get('global_card_t2', 'card_red.png'),
+            'joker': st.session_state.get('global_card_joker', 'card_yellow.png')
+        }
 
-    st.write("")
+    # --- PRÉVISUALISATION EN TEMPS RÉEL DES 3 CARTES ---
+    st.markdown("##### 👁️ Aperçu en direct des cartes sélectionnées pour le match :")
+    preview_name_tab1 = all_match_names[0] if all_match_names else "Antho"
+    preview_font_path = st.session_state.get('active_font_path', DEFAULT_FONT_PATH)
+
+    prev_cols = st.columns(3)
+    cards_preview_meta = [
+        ("🔵 Équipe 1", main_override_cards['t1'] if main_override_cards else 'card_blue.png'),
+        ("🔴 Équipe 2", main_override_cards['t2'] if main_override_cards else 'card_red.png'),
+        ("🃏 Jokers", main_override_cards['joker'] if main_override_cards else 'card_yellow.png')
+    ]
+
+    for idx_p, (c_label, c_path) in enumerate(cards_preview_meta):
+        with prev_cols[idx_p]:
+            st.caption(f"**{c_label}**")
+            if os.path.exists(c_path):
+                img_prev = create_player_card(c_path, preview_name_tab1, is_custom_fut=False, override_font_path=preview_font_path)
+                if img_prev:
+                    st.image(img_prev, use_container_width=True)
+                else:
+                    st.warning("Erreur rendu")
+            else:
+                st.info("Introuvable")
+
+    st.write("---")
 
     if st.button("⚡ Générer l'Équilibrage Parfait", type="primary"):
         if total_players_count != 10:
