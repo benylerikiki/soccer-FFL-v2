@@ -260,15 +260,23 @@ def calculate_global_score(row):
     return round(avg, 1)
 
 def get_card_generation(filename):
-    """ Extrait une génération ou un préfixe de la carte (ex: fut-23, toty, etc.) pour homogénéité """
     base = os.path.basename(filename).lower()
-    # Recherche d'un motif type fut23, fut-23, fifa22, etc.
     match = re.search(r'(fut[-]?\d+|fifa[-]?\d+|toty[-]?\d+|tots[-]?\d+|hero[-]?\d+)', base)
     if match:
         return match.group(1)
-    # Sinon on prend le préfixe avant le premier tiret ou underscore
     parts = re.split(r'[-_]', base)
     return parts[0] if len(parts) > 0 else 'default'
+
+def get_available_cards_list():
+    available_cards = []
+    if os.path.exists(CARTE_FUT_DIR):
+        available_cards = [os.path.join(CARTE_FUT_DIR, f) for f in os.listdir(CARTE_FUT_DIR) if f.lower().endswith('.png')]
+    for default_c in ['card_blue.png', 'card_red.png', 'card_yellow.png']:
+        if os.path.exists(default_c) and default_c not in available_cards:
+            available_cards.append(default_c)
+    if not available_cards:
+        available_cards = ['card_blue.png', 'card_red.png', 'card_yellow.png']
+    return available_cards
 
 # --- CHARGEMENT / SAUVEGARDE BASE JOUEURS ---
 def load_data():
@@ -707,9 +715,11 @@ with col_home:
         st.session_state['show_landing'] = True
         st.rerun()
 
+# Gestion popup affichage au rerun
 if st.session_state.get("open_teams_popup", False):
     st.session_state.open_teams_popup = False
-    show_teams_popup(st.session_state.last_team1, st.session_state.last_team2)
+    override = st.session_state.get('active_override_cards', None)
+    show_teams_popup(st.session_state.last_team1, st.session_state.last_team2, override_cards=override)
 
 tab1, tab_hist, tab_font, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "📜 Historique", "🎨 Police & Cartes", "🏃 Gestion des Bases"])
 
@@ -1062,6 +1072,38 @@ with tab1:
         remaining_options = [n for n in all_match_names if n != j1] if j1 != "Aucune restriction" else []
         j2 = st.selectbox("... à ne surtout pas faire jouer avec :", options=["Aucun"] + sorted(remaining_options), index=0, key="j2_all") if j1 != "Aucune restriction" else "Aucun"
 
+    st.write("---")
+    st.subheader("4. Choix des Cartes pour ce Match")
+    
+    main_use_default_cards = st.checkbox("Utiliser les cartes globales configurées dans l'onglet 'Police & Cartes'", value=True, key="main_chk_default_cards")
+    
+    main_override_cards = None
+    if not main_use_default_cards:
+        available_cards_list = get_available_cards_list()
+        main_card_mode = st.radio("Mode de sélection des cartes pour ce match :", ["Manuel (Équipe par Équipe)", "Aléatoire par Génération homogène"], key="main_card_mode")
+        
+        if main_card_mode == "Manuel (Équipe par Équipe)":
+            mc_t1 = st.selectbox("Carte Équipe 1 :", options=available_cards_list, key="main_sel_t1")
+            mc_t2 = st.selectbox("Carte Équipe 2 :", options=available_cards_list, key="main_sel_t2")
+            mc_joker = st.selectbox("Carte Jokers :", options=available_cards_list, key="main_sel_joker")
+            main_override_cards = {'t1': mc_t1, 't2': mc_t2, 'joker': mc_joker}
+        else:
+            generations = {}
+            for c_path in available_cards_list:
+                gen = get_card_generation(c_path)
+                generations.setdefault(gen, []).append(c_path)
+            selected_gen_main = st.selectbox("Série homogène :", options=list(generations.keys()), key="main_sel_gen")
+            if st.button("🎲 Tirer un pack aléatoire de cette génération", key="main_btn_rnd_gen"):
+                import random
+                g_cards = generations[selected_gen_main]
+                st.session_state['main_random_override'] = {
+                    't1': random.choice(g_cards),
+                    't2': random.choice(g_cards),
+                    'joker': random.choice(g_cards)
+                }
+                st.success(f"Pack aléatoire de la série **{selected_gen_main}** généré pour le match !")
+            main_override_cards = st.session_state.get('main_random_override', None)
+
     st.write("")
 
     if st.button("⚡ Générer l'Équilibrage Parfait", type="primary"):
@@ -1077,6 +1119,7 @@ with tab1:
                 st.session_state.last_team2 = best_team2
                 save_match_to_history(best_team1, best_team2)
                 st.session_state.open_teams_popup = True
+                st.session_state.active_override_cards = main_override_cards if not main_use_default_cards else None
                 st.rerun()
 
     if 'last_team1' in st.session_state and 'last_team2' in st.session_state:
@@ -1129,7 +1172,7 @@ with tab1:
             st.progress(col2 / 50)
 
 # ==========================================
-# 📜 TAB HISTORIQUE (Avec option de choix des cartes)
+# 📜 TAB HISTORIQUE
 # ==========================================
 with tab_hist:
     st.header("📜 Historique des Compositions (100 derniers matchs)")
@@ -1157,20 +1200,11 @@ with tab_hist:
 
         st.write("---")
         st.markdown("##### 🎴 Option d'affichage des cartes pour ce re-rendu :")
-        use_current_cards = st.checkbox("Utiliser les cartes globales actuelles configurées (sinon sélection spécifique / aléatoire homogène)", value=True, key="chk_use_current_cards")
+        use_current_cards = st.checkbox("Utiliser les cartes globales actuelles configurées", value=True, key="chk_use_current_cards")
         
         override_cards_dict = None
         if not use_current_cards:
-            # Récupérer les cartes disponibles dans CARTE_FUT_DIR
-            available_cards = []
-            if os.path.exists(CARTE_FUT_DIR):
-                available_cards = [os.path.join(CARTE_FUT_DIR, f) for f in os.listdir(CARTE_FUT_DIR) if f.lower().endswith('.png')]
-            for default_c in ['card_blue.png', 'card_red.png', 'card_yellow.png']:
-                if os.path.exists(default_c) and default_c not in available_cards:
-                    available_cards.append(default_c)
-            if not available_cards:
-                available_cards = ['card_blue.png', 'card_red.png', 'card_yellow.png']
-
+            available_cards = get_available_cards_list()
             c_opt1, c_opt2 = st.columns(2)
             with c_opt1:
                 hist_t1_card = st.selectbox("Carte Équipe 1 :", options=available_cards, key="hist_sel_t1")
@@ -1188,17 +1222,11 @@ with tab_hist:
             st.session_state.last_team1 = df_h1
             st.session_state.last_team2 = df_h2
             st.session_state.open_teams_popup = True
-            st.session_state.hist_override_cards = override_cards_dict
+            st.session_state.active_override_cards = override_cards_dict
             st.rerun()
 
-# Gestion popup avec override si présent
-if st.session_state.get("open_teams_popup", False):
-    st.session_state.open_teams_popup = False
-    override = st.session_state.get('hist_override_cards', None)
-    show_teams_popup(st.session_state.last_team1, st.session_state.last_team2, override_cards=override)
-
 # ==========================================
-# 🎨 TAB POLICE & CARTES GLOBALES (Avec choix par génération)
+# 🎨 TAB POLICE & CARTES GLOBALES
 # ==========================================
 with tab_font:
     st.header("🎨 Police & Cartes Globales des Équipes")
@@ -1274,19 +1302,7 @@ with tab_font:
                 st.success(f"✅ Carte **{card_filename}** ajoutée dans `{CARTE_FUT_DIR}/` !")
                 st.rerun()
 
-        # Lister les cartes disponibles
-        available_cards = []
-        if os.path.exists(CARTE_FUT_DIR):
-            available_cards = [os.path.join(CARTE_FUT_DIR, f) for f in os.listdir(CARTE_FUT_DIR) if f.lower().endswith('.png')]
-        
-        for default_c in ['card_blue.png', 'card_red.png', 'card_yellow.png']:
-            if os.path.exists(default_c) and default_c not in available_cards:
-                available_cards.append(default_c)
-
-        if not available_cards:
-            available_cards = ['card_blue.png', 'card_red.png', 'card_yellow.png']
-
-        # Option de sélection par génération ou individuelle
+        available_cards = get_available_cards_list()
         card_mode = st.radio("Mode d'attribution des cartes :", ["Manuel (Équipe par Équipe)", "Aléatoire par Génération homogène"], key="card_mode_select")
 
         if card_mode == "Manuel (Équipe par Équipe)":
@@ -1305,7 +1321,6 @@ with tab_font:
                 st.success("✅ Cartes globales assignées avec succès !")
                 st.rerun()
         else:
-            # Regroupement par génération (ex: fut-23, fut-22, etc.)
             generations = {}
             for c_path in available_cards:
                 gen = get_card_generation(c_path)
@@ -1315,7 +1330,6 @@ with tab_font:
             if st.button("🎲 Appliquer un pack aléatoire de cette génération", type="primary"):
                 import random
                 gen_cards = generations[selected_gen]
-                # Tire des cartes au sort dans la même génération
                 st.session_state['global_card_t1'] = random.choice(gen_cards)
                 st.session_state['global_card_t2'] = random.choice(gen_cards)
                 st.session_state['global_card_joker'] = random.choice(gen_cards)
