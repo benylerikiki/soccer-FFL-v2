@@ -21,14 +21,13 @@ DEFAULT_FONT_PATH = 'FootballAttack.otf'
 LOGO_PATH = 'icon_ffl.png'
 IMAGE_PATH = 'Intro.jpeg'
 FUT_CARDS_DIR = 'cards_fut'
-CARTE_FUT_DIR = 'carte_fut'  # Dossier dédié pour les cartes globales des équipes
+CARTE_FUT_DIR = 'carte_fut'  
 FONTS_DIR = 'fonts'
 
 os.makedirs(FUT_CARDS_DIR, exist_ok=True)
 os.makedirs(CARTE_FUT_DIR, exist_ok=True)
 os.makedirs(FONTS_DIR, exist_ok=True)
 
-# Déplacer/Copier la police par défaut dans fonts/ si elle existe à la racine
 if os.path.exists(DEFAULT_FONT_PATH):
     dest_default = os.path.join(FONTS_DIR, DEFAULT_FONT_PATH)
     if not os.path.exists(dest_default):
@@ -48,7 +47,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- GESTION DE L'ÉTAPE DE LANDING VIA QUERY PARAMS ET SESSION ---
+# --- GESTION DE L'ÉTAPE DE LANDING ---
 if "enter" in st.query_params:
     st.session_state['show_landing'] = False
 
@@ -151,7 +150,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- INITIALISATION DES VARIABLES DE SESSION ---
+# --- INITIALISATION DE SESSION ---
 if 'db_editor_version' not in st.session_state:
     st.session_state['db_editor_version'] = 0
 
@@ -234,7 +233,7 @@ def delete_file_from_github(file_path: str, commit_message: str) -> bool:
         st.error(f"❌ Erreur suppression GitHub ({file_path}) : {e}")
         return False
 
-# --- GESTION DES CARTES FUT ---
+# --- GESTION DES CARTES FUT & GÉNÉRATIONS ---
 def get_player_id(player_name: str) -> str:
     clean = re.sub(r'[^a-zA-Z0-9]', '_', str(player_name).strip().lower())
     return re.sub(r'_+', '_', clean).strip('_')
@@ -259,6 +258,17 @@ def calculate_global_score(row):
     col = text_to_score(row.get("Collectif", 5))
     avg = (att + defe + gk + col) / 4.0
     return round(avg, 1)
+
+def get_card_generation(filename):
+    """ Extrait une génération ou un préfixe de la carte (ex: fut-23, toty, etc.) pour homogénéité """
+    base = os.path.basename(filename).lower()
+    # Recherche d'un motif type fut23, fut-23, fifa22, etc.
+    match = re.search(r'(fut[-]?\d+|fifa[-]?\d+|toty[-]?\d+|tots[-]?\d+|hero[-]?\d+)', base)
+    if match:
+        return match.group(1)
+    # Sinon on prend le préfixe avant le premier tiret ou underscore
+    parts = re.split(r'[-_]', base)
+    return parts[0] if len(parts) > 0 else 'default'
 
 # --- CHARGEMENT / SAUVEGARDE BASE JOUEURS ---
 def load_data():
@@ -516,7 +526,7 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
 
     return card_img
 
-def draw_combined_field(t1, t2):
+def draw_combined_field(t1, t2, override_cards=None):
     fig, ax = plt.subplots(figsize=(10, 6.5))
     fig.patch.set_facecolor('#226343')
     ax.set_facecolor('#226343')
@@ -535,14 +545,18 @@ def draw_combined_field(t1, t2):
     card_width = 13.5
     card_height = 18.0
     
-    # Récupération des cartes globales stockées dans CARTE_FUT_DIR ou valeurs par défaut
     default_t1_card = 'card_blue.png'
     default_t2_card = 'card_red.png'
     default_joker_card = 'card_yellow.png'
     
-    global_card_t1 = st.session_state.get('global_card_t1', default_t1_card)
-    global_card_t2 = st.session_state.get('global_card_t2', default_t2_card)
-    global_card_joker = st.session_state.get('global_card_joker', default_joker_card)
+    if override_cards:
+        global_card_t1 = override_cards.get('t1', default_t1_card)
+        global_card_t2 = override_cards.get('t2', default_t2_card)
+        global_card_joker = override_cards.get('joker', default_joker_card)
+    else:
+        global_card_t1 = st.session_state.get('global_card_t1', default_t1_card)
+        global_card_t2 = st.session_state.get('global_card_t2', default_t2_card)
+        global_card_joker = st.session_state.get('global_card_joker', default_joker_card)
     
     # Équipe 1
     pos1 = [(7, 30), (23, 13), (23, 47), (40, 17), (40, 43)]
@@ -604,9 +618,9 @@ def draw_combined_field(t1, t2):
     return fig
 
 @st.dialog("Compositions du Match", width="large")
-def show_teams_popup(t1, t2):
+def show_teams_popup(t1, t2, override_cards=None):
     st.write("Match équilibré généré avec succès ! 📸")
-    fig_combined = draw_combined_field(t1, t2)
+    fig_combined = draw_combined_field(t1, t2, override_cards=override_cards)
     st.pyplot(fig_combined, use_container_width=True)
     
     buf = io.BytesIO()
@@ -1115,7 +1129,7 @@ with tab1:
             st.progress(col2 / 50)
 
 # ==========================================
-# 📜 TAB HISTORIQUE
+# 📜 TAB HISTORIQUE (Avec option de choix des cartes)
 # ==========================================
 with tab_hist:
     st.header("📜 Historique des Compositions (100 derniers matchs)")
@@ -1141,14 +1155,50 @@ with tab_hist:
             df_h2["Note Globale"] = df_h2.apply(calculate_global_score, axis=1)
             st.dataframe(df_h2[["Nom du Joueur", "Attaque", "Défense", "Gardien", "Collectif", "Note Globale"]], hide_index=True, use_container_width=True)
 
+        st.write("---")
+        st.markdown("##### 🎴 Option d'affichage des cartes pour ce re-rendu :")
+        use_current_cards = st.checkbox("Utiliser les cartes globales actuelles configurées (sinon sélection spécifique / aléatoire homogène)", value=True, key="chk_use_current_cards")
+        
+        override_cards_dict = None
+        if not use_current_cards:
+            # Récupérer les cartes disponibles dans CARTE_FUT_DIR
+            available_cards = []
+            if os.path.exists(CARTE_FUT_DIR):
+                available_cards = [os.path.join(CARTE_FUT_DIR, f) for f in os.listdir(CARTE_FUT_DIR) if f.lower().endswith('.png')]
+            for default_c in ['card_blue.png', 'card_red.png', 'card_yellow.png']:
+                if os.path.exists(default_c) and default_c not in available_cards:
+                    available_cards.append(default_c)
+            if not available_cards:
+                available_cards = ['card_blue.png', 'card_red.png', 'card_yellow.png']
+
+            c_opt1, c_opt2 = st.columns(2)
+            with c_opt1:
+                hist_t1_card = st.selectbox("Carte Équipe 1 :", options=available_cards, key="hist_sel_t1")
+                hist_joker_card = st.selectbox("Carte Jokers :", options=available_cards, key="hist_sel_joker")
+            with c_opt2:
+                hist_t2_card = st.selectbox("Carte Équipe 2 :", options=available_cards, key="hist_sel_t2")
+            
+            override_cards_dict = {
+                't1': hist_t1_card,
+                't2': hist_t2_card,
+                'joker': hist_joker_card
+            }
+
         if st.button("🔄 Re-générer le visuel de ce match", type="primary"):
             st.session_state.last_team1 = df_h1
             st.session_state.last_team2 = df_h2
             st.session_state.open_teams_popup = True
+            st.session_state.hist_override_cards = override_cards_dict
             st.rerun()
 
+# Gestion popup avec override si présent
+if st.session_state.get("open_teams_popup", False):
+    st.session_state.open_teams_popup = False
+    override = st.session_state.get('hist_override_cards', None)
+    show_teams_popup(st.session_state.last_team1, st.session_state.last_team2, override_cards=override)
+
 # ==========================================
-# 🎨 TAB POLICE & CARTES GLOBALES (Dossier CARTE_FUT_DIR)
+# 🎨 TAB POLICE & CARTES GLOBALES (Avec choix par génération)
 # ==========================================
 with tab_font:
     st.header("🎨 Police & Cartes Globales des Équipes")
@@ -1212,7 +1262,6 @@ with tab_font:
         st.write("---")
         st.subheader("2. Gestion des Cartes Globales (`carte_fut`)")
         
-        # Uploader une nouvelle carte globale dans le dossier CARTE_FUT_DIR
         uploaded_global_card = st.file_uploader("Ajouter une carte PNG dans `carte_fut/`", type=["png"], key="up_global_card")
         if uploaded_global_card is not None:
             if st.button("📤 Enregistrer la carte globale"):
@@ -1225,12 +1274,11 @@ with tab_font:
                 st.success(f"✅ Carte **{card_filename}** ajoutée dans `{CARTE_FUT_DIR}/` !")
                 st.rerun()
 
-        # Lister les cartes disponibles dans le dossier CARTE_FUT_DIR + fichiers racine par défaut
+        # Lister les cartes disponibles
         available_cards = []
         if os.path.exists(CARTE_FUT_DIR):
             available_cards = [os.path.join(CARTE_FUT_DIR, f) for f in os.listdir(CARTE_FUT_DIR) if f.lower().endswith('.png')]
         
-        # Ajouter les cartes de base si elles existent
         for default_c in ['card_blue.png', 'card_red.png', 'card_yellow.png']:
             if os.path.exists(default_c) and default_c not in available_cards:
                 available_cards.append(default_c)
@@ -1238,20 +1286,41 @@ with tab_font:
         if not available_cards:
             available_cards = ['card_blue.png', 'card_red.png', 'card_yellow.png']
 
-        current_t1 = st.session_state.get('global_card_t1', 'card_blue.png')
-        current_t2 = st.session_state.get('global_card_t2', 'card_red.png')
-        current_joker = st.session_state.get('global_card_joker', 'card_yellow.png')
+        # Option de sélection par génération ou individuelle
+        card_mode = st.radio("Mode d'attribution des cartes :", ["Manuel (Équipe par Équipe)", "Aléatoire par Génération homogène"], key="card_mode_select")
 
-        sel_t1 = st.selectbox("Carte globale Équipe 1 :", options=available_cards, index=available_cards.index(current_t1) if current_t1 in available_cards else 0)
-        sel_t2 = st.selectbox("Carte globale Équipe 2 :", options=available_cards, index=available_cards.index(current_t2) if current_t2 in available_cards else 0)
-        sel_joker = st.selectbox("Carte globale Jokers :", options=available_cards, index=available_cards.index(current_joker) if current_joker in available_cards else 0)
+        if card_mode == "Manuel (Équipe par Équipe)":
+            current_t1 = st.session_state.get('global_card_t1', 'card_blue.png')
+            current_t2 = st.session_state.get('global_card_t2', 'card_red.png')
+            current_joker = st.session_state.get('global_card_joker', 'card_yellow.png')
 
-        if st.button("💾 Assigner ces cartes aux équipes", type="primary"):
-            st.session_state['global_card_t1'] = sel_t1
-            st.session_state['global_card_t2'] = sel_t2
-            st.session_state['global_card_joker'] = sel_joker
-            st.success("✅ Cartes globales assignées avec succès !")
-            st.rerun()
+            sel_t1 = st.selectbox("Carte globale Équipe 1 :", options=available_cards, index=available_cards.index(current_t1) if current_t1 in available_cards else 0)
+            sel_t2 = st.selectbox("Carte globale Équipe 2 :", options=available_cards, index=available_cards.index(current_t2) if current_t2 in available_cards else 0)
+            sel_joker = st.selectbox("Carte globale Jokers :", options=available_cards, index=available_cards.index(current_joker) if current_joker in available_cards else 0)
+
+            if st.button("💾 Assigner ces cartes", type="primary"):
+                st.session_state['global_card_t1'] = sel_t1
+                st.session_state['global_card_t2'] = sel_t2
+                st.session_state['global_card_joker'] = sel_joker
+                st.success("✅ Cartes globales assignées avec succès !")
+                st.rerun()
+        else:
+            # Regroupement par génération (ex: fut-23, fut-22, etc.)
+            generations = {}
+            for c_path in available_cards:
+                gen = get_card_generation(c_path)
+                generations.setdefault(gen, []).append(c_path)
+
+            selected_gen = st.selectbox("Choisir la génération / série homogène :", options=list(generations.keys()))
+            if st.button("🎲 Appliquer un pack aléatoire de cette génération", type="primary"):
+                import random
+                gen_cards = generations[selected_gen]
+                # Tire des cartes au sort dans la même génération
+                st.session_state['global_card_t1'] = random.choice(gen_cards)
+                st.session_state['global_card_t2'] = random.choice(gen_cards)
+                st.session_state['global_card_joker'] = random.choice(gen_cards)
+                st.success(f"✅ Cartes de la génération **{selected_gen}** appliquées uniformément !")
+                st.rerun()
 
     with col_f2:
         st.subheader("👁️ Aperçu des Cartes Globales Assignées")
