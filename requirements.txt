@@ -4,3 +4,4 @@ openpyxl
 matplotlib
 Pillow
 PyGithub
+rembg
