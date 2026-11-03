@@ -23,11 +23,13 @@ IMAGE_PATH = 'Intro.jpeg'
 FUT_CARDS_DIR = 'cards_fut'
 CARTE_FUT_DIR = 'carte_fut'  
 CARTE_FUT_PREV_DIR = 'cartes_fut_prev'
+PHOTO_JOUEUR_DIR = 'photo_joueur'
 FONTS_DIR = 'fonts'
 
 os.makedirs(FUT_CARDS_DIR, exist_ok=True)
 os.makedirs(CARTE_FUT_DIR, exist_ok=True)
 os.makedirs(CARTE_FUT_PREV_DIR, exist_ok=True)
+os.makedirs(PHOTO_JOUEUR_DIR, exist_ok=True)
 os.makedirs(FONTS_DIR, exist_ok=True)
 
 if os.path.exists(DEFAULT_FONT_PATH):
@@ -82,7 +84,7 @@ if "enter" in st.query_params:
 if 'show_landing' not in st.session_state:
     st.session_state['show_landing'] = True
 
-# --- 2. CSS & STYLES (Anti-étirement des images) ---
+# --- 2. CSS & STYLES ---
 if os.path.exists(LOGO_PATH):
     with open(LOGO_PATH, "rb") as f:
         icon_bytes = f.read()
@@ -108,7 +110,6 @@ if os.path.exists(LOGO_PATH):
 st.markdown(
     """
     <style>
-    /* Empêcher l'étirement des images de prévisualisation et conserver les proportions */
     div[data-testid="stImage"] img {
         object-fit: contain !important;
         max-width: 130px !important;
@@ -247,38 +248,28 @@ def push_file_to_github(file_path: str, content_bytes: bytes, commit_message: st
         st.error(f"❌ Erreur synchronisation GitHub ({file_path}) : {e}")
         return False
 
-def delete_file_from_github(file_path: str, commit_message: str) -> bool:
-    token = st.secrets.get("GITHUB_TOKEN")
-    repo_name = st.secrets.get("GITHUB_REPO")
-    branch = st.secrets.get("GITHUB_BRANCH", "main")
-
-    if not token or not repo_name:
-        return False
-
-    try:
-        g = Github(token)
-        repo = g.get_repo(repo_name)
-        try:
-            file_content = repo.get_contents(file_path, ref=branch)
-            repo.delete_file(file_content.path, commit_message, file_content.sha, branch=branch)
-            return True
-        except GithubException as ge:
-            if ge.status == 404:
-                return True
-            raise ge
-    except Exception as e:
-        st.error(f"❌ Erreur suppression GitHub ({file_path}) : {e}")
-        return False
-
-# --- GESTION DES CARTES FUT & GÉNÉRATIONS ---
+# --- GESTION DES CARTES FUT & PHOTOS ---
 def get_player_id(player_name: str) -> str:
     clean = re.sub(r'[^a-zA-Z0-9]', '_', str(player_name).strip().lower())
     return re.sub(r'_+', '_', clean).strip('_')
 
-def get_custom_card_path(player_name: str) -> str:
-    pid = get_player_id(player_name)
-    path = os.path.join(FUT_CARDS_DIR, f"{pid}.png")
-    return path if os.path.exists(path) else None
+def get_player_photo_path(player_name: str) -> str:
+    if not player_name:
+        return None
+    # Nettoyage si le nom contient "Joker "
+    clean_name = re.sub(r'^joker\s+', '', str(player_name).strip().lower())
+    pid = get_player_id(clean_name)
+    
+    # Cherche différentes extensions ou formats possibles dans photo_joueur/
+    for ext in ['.png', '.jpg', '.jpeg']:
+        path = os.path.join(PHOTO_JOUEUR_DIR, f"{pid}{ext}")
+        if os.path.exists(path):
+            return path
+        # Essai avec le nom complet brut
+        path_raw = os.path.join(PHOTO_JOUEUR_DIR, f"{get_player_id(player_name)}{ext}")
+        if os.path.exists(path_raw):
+            return path_raw
+    return None
 
 def text_to_score(val):
     if pd.isna(val):
@@ -386,8 +377,7 @@ def save_data(df):
         clean_df.to_excel(writer, index=False)
     buffer.seek(0)
 
-    if push_file_to_github(DATA_FILE, buffer.getvalue(), "Mise à jour base joueurs [via Soccer FFL]"):
-        st.toast("Base joueurs synchronisée sur GitHub !", icon="☁️")
+    push_file_to_github(DATA_FILE, buffer.getvalue(), "Mise à jour base joueurs [via Soccer FFL]")
 
 # --- CHARGEMENT / SAUVEGARDE BASE JOKERS ---
 def load_jokers_db():
@@ -412,8 +402,7 @@ def save_jokers_db(df):
         clean_df.to_excel(writer, index=False)
     buffer.seek(0)
 
-    if push_file_to_github(JOKERS_FILE, buffer.getvalue(), "Mise à jour base jokers [via Soccer FFL]"):
-        st.toast("Base jokers synchronisée sur GitHub !", icon="☁️")
+    push_file_to_github(JOKERS_FILE, buffer.getvalue(), "Mise à jour base jokers [via Soccer FFL]")
 
 # --- CHARGEMENT / SAUVEGARDE HISTORIQUE ---
 def load_history_db():
@@ -460,17 +449,14 @@ def save_match_to_history(df_t1, df_t2):
     }])
 
     hist_df = pd.concat([new_row, hist_df], ignore_index=True)
-    
     if len(hist_df) > 100:
         hist_df = hist_df.iloc[:100]
 
     hist_df.to_excel(HISTORY_FILE, index=False)
-
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
         hist_df.to_excel(writer, index=False)
     buffer.seek(0)
-
     push_file_to_github(HISTORY_FILE, buffer.getvalue(), f"Ajout composition {now_str} à l'historique")
 
 if 'players_df' not in st.session_state:
@@ -508,7 +494,7 @@ if st.session_state.get('show_landing', True):
     st.stop()
 
 # ==========================================
-# ⚽ RENDU DU TERRAIN & POPUP
+# ⚽ RENDU DU TERRAIN & INCRUSTATION PHOTO
 # ==========================================
 def create_player_card(card_path, player_name, is_custom_fut=False, override_font_path=None):
     if not os.path.exists(card_path):
@@ -519,12 +505,39 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
     if is_custom_fut:
         return card_img
 
-    draw = ImageDraw.Draw(card_img)
     w, h = card_img.size
+
+    # --- 1. INCRUSTATION DE LA PHOTO DU JOUEUR (SI DISPONIBLE) ---
+    photo_path = get_player_photo_path(player_name)
+    if photo_path and os.path.exists(photo_path):
+        try:
+            with Image.open(photo_path).convert("RGBA") as photo_img:
+                # Calcul de la taille max pour rester dans la carte sans déborder (ex: max 65% de la largeur, 50% de la hauteur)
+                max_photo_w = int(w * 0.75)
+                max_photo_h = int(h * 0.50)
+                
+                p_w, p_h = photo_img.size
+                ratio = min(max_photo_w / p_w, max_photo_h / p_h)
+                new_p_w = int(p_w * ratio)
+                new_p_h = int(p_h * ratio)
+                
+                photo_resized = photo_img.resize((new_p_w, new_p_h), Image.Resampling.LANCZOS)
+                
+                # Positionnement centré horizontalement, au-dessus de la zone du nom (centré vers y = 38% de la carte)
+                paste_x = (w - new_p_w) // 2
+                paste_y = int(h * 0.38) - (new_p_h // 2)
+                
+                # Collage en utilisant l'alpha de l'image transparente
+                card_img.paste(photo_resized, (paste_x, paste_y), photo_resized)
+        except Exception:
+            pass
+
+    # --- 2. AJOUT DU NOM EN TEXTE ---
+    draw = ImageDraw.Draw(card_img)
     max_text_width = w * 0.85
     
-    y_pos = int(h * (2 / 3))
-    font_size = max(24, int(w * 0.18))
+    y_pos = int(h * (0.74))  # Un peu plus bas pour laisser de la place au portrait au-dessus
+    font_size = max(20, int(w * 0.15))
     stroke_w = max(2, int(font_size * 0.07))
     
     raw_name = player_name.strip()
@@ -968,7 +981,8 @@ with tab1:
     for idx, name in enumerate(all_names):
         col = cols[idx % 3]
         key = f"chk_p_{name}"
-        if col.checkbox(name, key=key):
+        has_photo = " 📸" if get_player_photo_path(name) else ""
+        if col.checkbox(f"{name}{has_photo}", key=key):
             selected_names.append(name)
             st.session_state.auto_selected.add(name)
         else:
@@ -986,7 +1000,8 @@ with tab1:
         for idx_jk, jk in enumerate(st.session_state.match_jokers_list):
             c_txt, c_del = st.columns([5, 1])
             with c_txt:
-                st.info(f"🃏 **{jk['Nom du Joueur']}** — Notes : Att {jk['Attaque']} | Déf {jk['Défense']} | Gk {jk['Gardien']} | Col {jk['Collectif']}")
+                p_status = "📸 (Photo OK)" if get_player_photo_path(jk['Nom du Joueur']) else ""
+                st.info(f"🃏 **{jk['Nom du Joueur']}** {p_status} — Notes : Att {jk['Attaque']} | Déf {jk['Défense']} | Gk {jk['Gardien']} | Col {jk['Collectif']}")
             with c_del:
                 if st.button("❌", key=f"del_match_jk_{idx_jk}"):
                     st.session_state.match_jokers_list.pop(idx_jk)
@@ -1162,7 +1177,7 @@ with tab1:
             'joker': st.session_state.get('global_card_joker', 'card_yellow.png')
         }
 
-    # --- PRÉVISUALISATION EN TEMPS RÉEL (Via le dossier cartes_fut_prev) ---
+    # --- PRÉVISUALISATION EN TEMPS RÉEL (Avec Portrait) ---
     st.markdown("##### 👁️ Aperçu en direct des cartes sélectionnées pour le match :")
     preview_name_tab1 = all_match_names[0] if all_match_names else "Antho"
     preview_font_path = st.session_state.get('active_font_path', DEFAULT_FONT_PATH)
@@ -1399,9 +1414,8 @@ with tab_font:
                     f.write(card_bytes)
                 
                 resize_and_save_preview(target_card_path)
-
                 push_file_to_github(target_card_path, card_bytes, f"Ajout carte globale {card_filename}")
-                st.success(f"✅ Carte **{card_filename}** ajoutée et redimensionnée pour les prévisualisations !")
+                st.success(f"✅ Carte **{card_filename}** ajoutée et redimensionnée !")
                 st.rerun()
 
         available_cards = get_available_cards_list()
@@ -1468,11 +1482,11 @@ with tab_font:
                     st.info("Introuvable.")
 
 # ==========================================
-# 🏃 TAB 2 : GESTION DES BASES
+# 🏃 TAB 2 : GESTION DES BASES & PHOTOS
 # ==========================================
 with tab2:
-    st.header("Gestion des Bases de Données")
-    subtab_players, subtab_jokers = st.tabs(["📋 Base Principale Joueurs", "🃏 Base Dédiée Jokers"])
+    st.header("Gestion des Bases de Données & Portraits")
+    subtab_players, subtab_jokers, subtab_photos = st.tabs(["📋 Base Principale Joueurs", "🃏 Base Dédiée Jokers", "📸 Gestion des Portraits"])
     
     with subtab_players:
         col_add, col_del = st.columns(2)
@@ -1536,3 +1550,30 @@ with tab2:
             save_jokers_db(edited_jokers_df)
             st.success("✅ Jokers sauvegardés !")
             st.rerun()
+
+    with subtab_photos:
+        st.subheader("📸 Gestion des portraits transparents (`photo_joueur`)")
+        st.write("Uploade ici le portrait d'un joueur. Le nom du fichier sera automatiquement nettoyé pour correspondre au joueur (ex: `antho.png` pour Antho).")
+        
+        uploaded_photo = st.file_uploader("Ajouter un portrait PNG transparent", type=["png", "jpg", "jpeg"], key="up_player_photo")
+        if uploaded_photo is not None:
+            photo_filename = uploaded_photo.name
+            target_photo_path = os.path.join(PHOTO_JOUEUR_DIR, photo_filename)
+            photo_bytes = uploaded_photo.getvalue()
+            with open(target_photo_path, "wb") as f:
+                f.write(photo_bytes)
+            st.success(f"✅ Portrait **{photo_filename}** enregistré dans `{PHOTO_JOUEUR_DIR}/` avec succès !")
+            st.rerun()
+
+        st.markdown("##### 📋 Liste des portraits actuellement détectés :")
+        if os.path.exists(PHOTO_JOUEUR_DIR):
+            photos_in_folder = os.listdir(PHOTO_JOUEUR_DIR)
+            if photos_in_folder:
+                p_cols = st.columns(4)
+                for idx_ph, p_file in enumerate(photos_in_folder):
+                    col_idx = idx_ph % 4
+                    with p_cols[col_idx]:
+                        full_p_path = os.path.join(PHOTO_JOUEUR_DIR, p_file)
+                        st.image(full_p_path, caption=p_file, width=80)
+            else:
+                st.info("Aucun portrait trouvé dans le dossier pour le moment.")
