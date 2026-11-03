@@ -22,16 +22,47 @@ LOGO_PATH = 'icon_ffl.png'
 IMAGE_PATH = 'Intro.jpeg'
 FUT_CARDS_DIR = 'cards_fut'
 CARTE_FUT_DIR = 'carte_fut'  
+CARTE_FUT_PREV_DIR = 'cartes_fut_prev'
 FONTS_DIR = 'fonts'
 
 os.makedirs(FUT_CARDS_DIR, exist_ok=True)
 os.makedirs(CARTE_FUT_DIR, exist_ok=True)
+os.makedirs(CARTE_FUT_PREV_DIR, exist_ok=True)
 os.makedirs(FONTS_DIR, exist_ok=True)
 
 if os.path.exists(DEFAULT_FONT_PATH):
     dest_default = os.path.join(FONTS_DIR, DEFAULT_FONT_PATH)
     if not os.path.exists(dest_default):
         shutil.copyfile(DEFAULT_FONT_PATH, dest_default)
+
+# --- GESTION DES MINIATURES DE PRÉVISUALISATION (100px) ---
+def resize_and_save_preview(source_path, target_dir=CARTE_FUT_PREV_DIR, target_width=100):
+    try:
+        filename = os.path.basename(source_path)
+        target_path = os.path.join(target_dir, filename)
+        # On régénère si la miniature n'existe pas ou si la source est plus récente
+        if not os.path.exists(target_path) or os.path.getmtime(source_path) > os.path.getmtime(target_path):
+            with Image.open(source_path) as img:
+                w_percent = (target_width / float(img.size[0]))
+                h_size = int(float(img.size[1]) * float(w_percent))
+                img_resized = img.resize((target_width, h_size), Image.Resampling.LANCZOS)
+                img_resized.save(target_path)
+        return target_path
+    except Exception:
+        return source_path
+
+def sync_all_previews():
+    if os.path.exists(CARTE_FUT_DIR):
+        for f in os.listdir(CARTE_FUT_DIR):
+            if f.lower().endswith('.png'):
+                resize_and_save_preview(os.path.join(CARTE_FUT_DIR, f))
+    # Traiter aussi les cartes par défaut si présentes à la racine
+    for default_c in ['card_blue.png', 'card_red.png', 'card_yellow.png']:
+        if os.path.exists(default_c):
+            resize_and_save_preview(default_c)
+
+# Synchronisation des miniatures au démarrage
+sync_all_previews()
 
 # --- 1. CHARGEMENT DE L'ICÔNE ---
 app_icon = "⚽"
@@ -277,6 +308,15 @@ def get_available_cards_list():
     if not available_cards:
         available_cards = ['card_blue.png', 'card_red.png', 'card_yellow.png']
     return available_cards
+
+def get_preview_card_path(full_card_path):
+    filename = os.path.basename(full_card_path)
+    prev_path = os.path.join(CARTE_FUT_PREV_DIR, filename)
+    if os.path.exists(prev_path):
+        return prev_path
+    elif os.path.exists(full_card_path):
+        return resize_and_save_preview(full_card_path)
+    return full_card_path
 
 # --- CHARGEMENT / SAUVEGARDE BASE JOUEURS ---
 def load_data():
@@ -1094,7 +1134,6 @@ with tab1:
                 generations.setdefault(gen, []).append(c_path)
             selected_gen_main = st.selectbox("Série homogène :", options=list(generations.keys()), key="main_sel_gen")
             
-            # Gestion aléatoire persistante dans la session pour la prévisualisation en temps réel
             if 'main_random_override' not in st.session_state:
                 import random
                 g_cards = generations[selected_gen_main]
@@ -1111,14 +1150,13 @@ with tab1:
                 st.rerun()
             main_override_cards = st.session_state.get('main_random_override', None)
     else:
-        # Si on utilise les cartes par défaut
         main_override_cards = {
             't1': st.session_state.get('global_card_t1', 'card_blue.png'),
             't2': st.session_state.get('global_card_t2', 'card_red.png'),
             'joker': st.session_state.get('global_card_joker', 'card_yellow.png')
         }
 
-    # --- PRÉVISUALISATION EN TEMPS RÉEL DES 3 CARTES ---
+    # --- PRÉVISUALISATION EN TEMPS RÉEL (Via le dossier cartes_fut_prev) ---
     st.markdown("##### 👁️ Aperçu en direct des cartes sélectionnées pour le match :")
     preview_name_tab1 = all_match_names[0] if all_match_names else "Antho"
     preview_font_path = st.session_state.get('active_font_path', DEFAULT_FONT_PATH)
@@ -1133,8 +1171,9 @@ with tab1:
     for idx_p, (c_label, c_path) in enumerate(cards_preview_meta):
         with prev_cols[idx_p]:
             st.caption(f"**{c_label}**")
-            if os.path.exists(c_path):
-                img_prev = create_player_card(c_path, preview_name_tab1, is_custom_fut=False, override_font_path=preview_font_path)
+            prev_file_path = get_preview_card_path(c_path)
+            if os.path.exists(prev_file_path):
+                img_prev = create_player_card(prev_file_path, preview_name_tab1, is_custom_fut=False, override_font_path=preview_font_path)
                 if img_prev:
                     st.image(img_prev, use_container_width=True)
                 else:
@@ -1256,6 +1295,23 @@ with tab_hist:
                 'joker': hist_joker_card
             }
 
+            # Aperçu des cartes sélectionnées dans l'historique via les miniatures redimensionnées
+            st.markdown("##### 👁️ Aperçu des cartes choisies pour l'historique :")
+            h_prev_cols = st.columns(3)
+            h_preview_meta = [
+                ("🔵 Équipe 1", hist_t1_card),
+                ("🔴 Équipe 2", hist_t2_card),
+                ("🃏 Jokers", hist_joker_card)
+            ]
+            for idx_hp, (hp_label, hp_path) in enumerate(h_preview_meta):
+                with h_prev_cols[idx_hp]:
+                    st.caption(f"**{hp_label}**")
+                    hp_prev_file = get_preview_card_path(hp_path)
+                    if os.path.exists(hp_prev_file):
+                        img_hp = create_player_card(hp_prev_file, "TEST", is_custom_fut=False, override_font_path=preview_font_path)
+                        if img_hp:
+                            st.image(img_hp, use_container_width=True)
+
         if st.button("🔄 Re-générer le visuel de ce match", type="primary"):
             st.session_state.last_team1 = df_h1
             st.session_state.last_team2 = df_h2
@@ -1336,8 +1392,12 @@ with tab_font:
                 card_bytes = uploaded_global_card.getvalue()
                 with open(target_card_path, "wb") as f:
                     f.write(card_bytes)
+                
+                # Redimensionnement et sauvegarde immédiate dans le dossier de miniatures cartes_fut_prev
+                resize_and_save_preview(target_card_path)
+
                 push_file_to_github(target_card_path, card_bytes, f"Ajout carte globale {card_filename}")
-                st.success(f"✅ Carte **{card_filename}** ajoutée dans `{CARTE_FUT_DIR}/` !")
+                st.success(f"✅ Carte **{card_filename}** ajoutée et redimensionnée pour les prévisualisations !")
                 st.rerun()
 
         available_cards = get_available_cards_list()
@@ -1393,8 +1453,9 @@ with tab_font:
         for idx_card, (card_label, card_file_path) in enumerate(preview_cards):
             with cols_prev[idx_card]:
                 st.caption(f"**{card_label}**")
-                if os.path.exists(card_file_path):
-                    prev_img = create_player_card(card_file_path, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
+                prev_file_path = get_preview_card_path(card_file_path)
+                if os.path.exists(prev_file_path):
+                    prev_img = create_player_card(prev_file_path, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
                     if prev_img:
                         st.image(prev_img, use_container_width=True)
                     else:
