@@ -40,7 +40,6 @@ def resize_and_save_preview(source_path, target_dir=CARTE_FUT_PREV_DIR, target_w
     try:
         filename = os.path.basename(source_path)
         target_path = os.path.join(target_dir, filename)
-        # On régénère si la miniature n'existe pas ou si la source est plus récente
         if not os.path.exists(target_path) or os.path.getmtime(source_path) > os.path.getmtime(target_path):
             with Image.open(source_path) as img:
                 w_percent = (target_width / float(img.size[0]))
@@ -56,12 +55,10 @@ def sync_all_previews():
         for f in os.listdir(CARTE_FUT_DIR):
             if f.lower().endswith('.png'):
                 resize_and_save_preview(os.path.join(CARTE_FUT_DIR, f))
-    # Traiter aussi les cartes par défaut si présentes à la racine
     for default_c in ['card_blue.png', 'card_red.png', 'card_yellow.png']:
         if os.path.exists(default_c):
             resize_and_save_preview(default_c)
 
-# Synchronisation des miniatures au démarrage
 sync_all_previews()
 
 # --- 1. CHARGEMENT DE L'ICÔNE ---
@@ -85,7 +82,7 @@ if "enter" in st.query_params:
 if 'show_landing' not in st.session_state:
     st.session_state['show_landing'] = True
 
-# --- 2. CSS & STYLES ---
+# --- 2. CSS & STYLES (Anti-étirement des images) ---
 if os.path.exists(LOGO_PATH):
     with open(LOGO_PATH, "rb") as f:
         icon_bytes = f.read()
@@ -111,6 +108,15 @@ if os.path.exists(LOGO_PATH):
 st.markdown(
     """
     <style>
+    /* Empêcher l'étirement des images de prévisualisation et conserver les proportions */
+    div[data-testid="stImage"] img {
+        object-fit: contain !important;
+        max-width: 130px !important;
+        height: auto !important;
+        margin: 0 auto !important;
+        display: block !important;
+    }
+
     @media (max-width: 768px) {
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) {
             display: grid !important;
@@ -1175,7 +1181,7 @@ with tab1:
             if os.path.exists(prev_file_path):
                 img_prev = create_player_card(prev_file_path, preview_name_tab1, is_custom_fut=False, override_font_path=preview_font_path)
                 if img_prev:
-                    st.image(img_prev, use_container_width=True)
+                    st.image(img_prev, use_container_width=False)
                 else:
                     st.warning("Erreur rendu")
             else:
@@ -1295,7 +1301,6 @@ with tab_hist:
                 'joker': hist_joker_card
             }
 
-            # Aperçu des cartes sélectionnées dans l'historique via les miniatures redimensionnées
             st.markdown("##### 👁️ Aperçu des cartes choisies pour l'historique :")
             h_prev_cols = st.columns(3)
             h_preview_meta = [
@@ -1310,7 +1315,7 @@ with tab_hist:
                     if os.path.exists(hp_prev_file):
                         img_hp = create_player_card(hp_prev_file, "TEST", is_custom_fut=False, override_font_path=preview_font_path)
                         if img_hp:
-                            st.image(img_hp, use_container_width=True)
+                            st.image(img_hp, use_container_width=False)
 
         if st.button("🔄 Re-générer le visuel de ce match", type="primary"):
             st.session_state.last_team1 = df_h1
@@ -1341,7 +1346,7 @@ with tab_font:
         }
         div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCaption"]) img {
             width: 100% !important;
-            max-width: 150px !important;
+            max-width: 130px !important;
             height: auto !important;
             object-fit: contain !important;
             display: block !important;
@@ -1393,7 +1398,6 @@ with tab_font:
                 with open(target_card_path, "wb") as f:
                     f.write(card_bytes)
                 
-                # Redimensionnement et sauvegarde immédiate dans le dossier de miniatures cartes_fut_prev
                 resize_and_save_preview(target_card_path)
 
                 push_file_to_github(target_card_path, card_bytes, f"Ajout carte globale {card_filename}")
@@ -1457,7 +1461,7 @@ with tab_font:
                 if os.path.exists(prev_file_path):
                     prev_img = create_player_card(prev_file_path, preview_player_name, is_custom_fut=False, override_font_path=preview_font_path)
                     if prev_img:
-                        st.image(prev_img, use_container_width=True)
+                        st.image(prev_img, use_container_width=False)
                     else:
                         st.warning("Erreur rendu.")
                 else:
