@@ -4,19 +4,13 @@ import os
 import shutil
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from PIL import Image, ImageDraw, ImageFont, ImageChops
+from PIL import Image, ImageDraw, ImageFont
 import io
 import itertools
 import re
 import base64
 from datetime import datetime
 from github import Github, GithubException
-
-try:
-    from rembg import remove
-    REMBG_AVAILABLE = True
-except ImportError:
-    REMBG_AVAILABLE = False
 
 # Fichiers et dossiers requis
 DATA_FILE = 'database_joueurs_v2.xlsx'       
@@ -95,14 +89,6 @@ def text_to_score(val):
         return max(1, min(10, int(match.group())))
     return 5
 
-def calculate_global_score(row):
-    att = text_to_score(row.get("Attaque", 5))
-    defe = text_to_score(row.get("Défense", 5))
-    gk = text_to_score(row.get("Gardien", 1))
-    col = text_to_score(row.get("Collectif", 5))
-    avg = (att + defe + gk + col) / 4.0
-    return round(avg, 1)
-
 def get_card_generation(filename):
     base = os.path.basename(filename).lower()
     match = re.search(r'(fut[-]?\d+|fifa[-]?\d+|toty[-]?\d+|tots[-]?\d+|hero[-]?\d+|fc[-]?\d+)', base)
@@ -142,32 +128,27 @@ def get_dominant_card_color(card_path):
             if colors:
                 colors.sort(key=lambda x: x[0], reverse=True)
                 for _, col in colors:
-                    # Éviter le noir absolu ou le blanc pur
                     if 30 < sum(col[:3]) < 720:
                         return col[:3]
-        return (100, 50, 150) # Couleur par défaut (violette)
+        return (100, 50, 150)
     except Exception:
         return (100, 50, 150)
 
 def tint_photo_to_card(photo_img, card_path):
-    """Applique une harmonisation de couleur subtile sur le portrait pour accorder le maillot à la carte"""
     try:
         dominant_color = get_dominant_card_color(card_path)
         r, g, b = photo_img.convert("RGB").split()
-        
-        # Mélange subtil pour teinter les vêtements/maillot selon la couleur de la carte
         factor = 0.25
         r_t = r.point(lambda i: int(i * (1 - factor) + dominant_color[0] * factor))
         g_t = g.point(lambda i: int(i * (1 - factor) + dominant_color[1] * factor))
         b_t = b.point(lambda i: int(i * (1 - factor) + dominant_color[2] * factor))
-        
         tinted_rgb = Image.merge("RGB", (r_t, g_t, b_t))
         _, _, _, a = photo_img.split()
         return Image.merge("RGBA", (*tinted_rgb.split(), a))
     except Exception:
         return photo_img
 
-# --- 1. CHARGEMENT DE L'ICÔNE ---
+# --- CONFIGURATION DE LA PAGE ---
 app_icon = "⚽"
 if os.path.exists(LOGO_PATH):
     try:
@@ -181,118 +162,13 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- GESTION DE L'ÉTAPE DE LANDING ---
-if "enter" in st.query_params:
-    st.session_state['show_landing'] = False
-
+# --- INITIALISATION SÉCURISÉE DES ÉTATS ---
 if 'show_landing' not in st.session_state:
     st.session_state['show_landing'] = True
 
-# --- 2. CSS & STYLES ---
-if os.path.exists(LOGO_PATH):
-    with open(LOGO_PATH, "rb") as f:
-        icon_bytes = f.read()
-    icon_b64 = base64.b64encode(icon_bytes).decode('utf-8')
-    
-    pwa_javascript_fix = f"""
-        <script>
-            var link = document.querySelector("link[rel*='icon']") || document.createElement('link');
-            link.type = 'image/png';
-            link.rel = 'shortcut icon';
-            link.href = 'data:image/png;base64,{icon_b64}';
-            document.getElementsByTagName('head')[0].appendChild(link);
+if "enter" in st.query_params:
+    st.session_state['show_landing'] = False
 
-            var appleLink = document.createElement('link');
-            appleLink.rel = 'apple-touch-icon';
-            appleLink.sizes = '180x180';
-            appleLink.href = 'data:image/png;base64,{icon_b64}';
-            document.getElementsByTagName('head')[0].appendChild(appleLink);
-        </script>
-    """
-    st.markdown(pwa_javascript_fix, unsafe_allow_html=True)
-
-st.markdown(
-    """
-    <style>
-    div[data-testid="stImage"] img {
-        object-fit: contain !important;
-        max-width: 130px !important;
-        height: auto !important;
-        margin: 0 auto !important;
-        display: block !important;
-    }
-
-    @media (max-width: 768px) {
-        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) {
-            display: grid !important;
-            grid-template-columns: repeat(3, 1fr) !important;
-            gap: 8px !important;
-        }
-        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) > div[data-testid="stColumn"] {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            flex: none !important;
-        }
-        div[data-testid="stCheckbox"] label {
-            font-size: 13px !important;
-        }
-    }
-
-    .landing-card-container {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        width: 100%;
-        margin-top: 20px;
-    }
-
-    .landing-card {
-        display: inline-flex;
-        flex-direction: column;
-        max-width: 650px;
-        width: 100%;
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.6);
-        background-color: #1e1e1e;
-    }
-
-    .landing-card img {
-        width: 100%;
-        height: auto;
-        display: block;
-        object-fit: contain;
-    }
-
-    .landing-card a.landing-btn {
-        display: block;
-        width: 100%;
-        background-color: #28a745;
-        color: white !important;
-        text-align: center;
-        font-size: 20px;
-        font-weight: bold;
-        padding: 16px 0;
-        text-decoration: none !important;
-        transition: background-color 0.2s ease, transform 0.1s ease;
-        box-sizing: border-box;
-    }
-
-    .landing-card a.landing-btn:hover {
-        background-color: #218838;
-        color: white !important;
-    }
-
-    .landing-card a.landing-btn:active {
-        transform: scale(0.99);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# --- INITIALISATION DE SESSION ---
 if 'db_editor_version' not in st.session_state:
     st.session_state['db_editor_version'] = 0
 
@@ -555,7 +431,6 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
     if photo_path and os.path.exists(photo_path):
         try:
             with Image.open(photo_path).convert("RGBA") as photo_img:
-                # Harmoniser la couleur du maillot selon la carte FUT
                 photo_img = tint_photo_to_card(photo_img, card_path)
 
                 max_photo_w = int(w * 0.75)
@@ -1180,19 +1055,16 @@ with tab2:
             st.rerun()
 
     with subtab_photos:
-        st.subheader("📸 Uploader, Lier ou Réassocier un portrait transparent")
+        st.subheader("📸 Uploader, Lier ou Réassocier un portrait")
         
         reg_list = st.session_state.players_df["Nom du Joueur"].tolist() if not st.session_state.players_df.empty else []
         jok_list = [f"Joker {j}" for j in st.session_state.jokers_db["Nom Joker"].tolist()] if not st.session_state.jokers_db.empty and "Nom Joker" in st.session_state.jokers_db.columns else []
         all_linkable_players = sorted(list(set(reg_list + jok_list)))
 
         if all_linkable_players:
-            # --- ONGLET 1 : NOUVEL UPLOAD AVEC SUPPRESSION DE FOND AUTOMATIQUE ---
             with st.expander("📤 1. Uploader un nouveau portrait", expanded=True):
                 selected_player_to_link = st.selectbox("Choisir le joueur ou joker à associer :", options=all_linkable_players, key="select_player_photo_link")
                 
-                auto_remove_bg = st.checkbox("✂️ Supprimer automatiquement l'arrière-plan (recommandé)", value=True, key="chk_auto_remove_bg")
-
                 target_has_photo = False
                 if selected_player_to_link in reg_list:
                     p_val = st.session_state.players_df.loc[st.session_state.players_df["Nom du Joueur"] == selected_player_to_link, "Photo"].values[0]
@@ -1211,22 +1083,13 @@ with tab2:
 
                 if uploaded_photo is not None:
                     if st.button("🔗 Enregistrer, lier et remplir l'Excel", key="btn_link_photo_submit", type="primary"):
-                        photo_bytes = uploaded_photo.getvalue()
-                        
-                        # Suppression de fond avec rembg si activé et dispo
-                        if auto_remove_bg and REMBG_AVAILABLE:
-                            try:
-                                with st.spinner("✂️ Détourage automatique de l'arrière-plan en cours..."):
-                                    photo_bytes = remove(photo_bytes)
-                            except Exception as e:
-                                st.warning(f"⚠️ Impossible de détourer automatiquement : {e}")
-
-                        ext = ".png" # Forcé en PNG pour garder la transparence
+                        ext = os.path.splitext(uploaded_photo.name)[1].lower()
                         clean_target_name = re.sub(r'^joker\s+', '', selected_player_to_link.strip().lower())
                         file_id = get_player_id(clean_target_name)
                         new_filename = f"{file_id}{ext}"
                         target_photo_path = os.path.join(PHOTO_JOUEUR_DIR, new_filename)
                         
+                        photo_bytes = uploaded_photo.getvalue()
                         with open(target_photo_path, "wb") as f:
                             f.write(photo_bytes)
                         
@@ -1243,10 +1106,9 @@ with tab2:
                             st.session_state.jokers_editor_version += 1
 
                         push_file_to_github(target_photo_path, photo_bytes, f"Ajout portrait lié pour {selected_player_to_link}")
-                        st.success(f"✅ Portrait détouré et lié avec succès à **{selected_player_to_link}** !")
+                        st.success(f"✅ Portrait lié avec succès à **{selected_player_to_link}** !")
                         st.rerun()
 
-            # --- ONGLET 2 : RÉASSOCIATION D'UN PORTRAIT EXISTANT ---
             with st.expander("🔄 2. Réassocier un portrait existant (sans ré-uploader)", expanded=False):
                 if os.path.exists(PHOTO_JOUEUR_DIR):
                     existing_photo_files = [f for f in os.listdir(PHOTO_JOUEUR_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
