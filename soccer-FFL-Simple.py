@@ -9,7 +9,6 @@ import io
 import itertools
 import re
 import base64
-import colorsys
 from datetime import datetime
 from github import Github, GithubException
 
@@ -25,7 +24,7 @@ FUT_CARDS_DIR = 'cards_fut'
 CARTE_FUT_DIR = 'carte_fut'  
 CARTE_FUT_PREV_DIR = 'cartes_fut_prev'
 PHOTO_JOUEUR_DIR = 'photo_joueur'
-MAILLOTS_DIR = 'maillots'  # Dossier dédié aux maillots
+MAILLOTS_DIR = 'maillots'
 FONTS_DIR = 'fonts'
 
 os.makedirs(FUT_CARDS_DIR, exist_ok=True)
@@ -122,7 +121,7 @@ def get_preview_card_path(full_card_path):
 
 sync_all_previews()
 
-# --- ANALYSE DE COULEUR & GESTION DES MAILLOTS (OPTION 2 DYNAMIQUE) ---
+# --- ANALYSE DE COULEUR & GESTION DES MAILLOTS ---
 def get_dominant_card_color(card_path):
     try:
         with Image.open(card_path) as card_img:
@@ -138,13 +137,8 @@ def get_dominant_card_color(card_path):
         return (100, 50, 150)
 
 def get_matching_jersey(card_path):
-    """
-    Associe la carte à un maillot existant dans le dossier maillots, 
-    ou en génère un dynamiquement par couleur si aucun ne correspond directement.
-    """
     card_filename = os.path.basename(card_path).lower()
     
-    # 1. Recherche d'une correspondance par nom dans le dossier maillots
     keywords = {
         'bleu': ['blue', 'bleu'],
         'rouge': ['red', 'rouge'],
@@ -162,7 +156,6 @@ def get_matching_jersey(card_path):
             if os.path.exists(j_path):
                 return j_path
 
-    # 2. Si aucune correspondance exacte, génération dynamique basée sur la couleur dominante
     card_id = os.path.splitext(os.path.basename(card_path))[0]
     dynamic_jersey_path = os.path.join(MAILLOTS_DIR, f"maillot_dynamic_{card_id}.png")
     
@@ -173,7 +166,6 @@ def get_matching_jersey(card_path):
     base_jersey_path = os.path.join(MAILLOTS_DIR, "maillot_blanc_noir.png")
     
     if not os.path.exists(base_jersey_path):
-        # Fallback si le maillot de base n'existe pas encore
         return card_path 
         
     try:
@@ -186,7 +178,6 @@ def get_matching_jersey(card_path):
             for x in range(width):
                 for y in range(height):
                     r, g, b, a = pixels[x, y]
-                    # Si le pixel est clair (blanc du maillot), on le colorise avec la teinte de la carte
                     if r > 200 and g > 200 and b > 200:
                         new_pixels[x, y] = (dominant_color[0], dominant_color[1], dominant_color[2], a)
                     else:
@@ -581,11 +572,10 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
 
     w, h = card_img.size
 
-    # --- 1. INCRUSTATION DU MAILLOT & DE LA PHOTO DU JOUEUR ---
+    # --- 1. INCRUSTATION DU MAILLOT & DU VISAGE ---
     photo_path = get_player_photo_path(player_name)
     if photo_path and os.path.exists(photo_path):
         try:
-            # Récupération du maillot adapté à la couleur de la carte
             jersey_path = get_matching_jersey(card_path)
             if jersey_path and os.path.exists(jersey_path):
                 with Image.open(jersey_path).convert("RGBA") as jersey_img:
@@ -599,7 +589,6 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
                     paste_y = int(h * 0.38) - (jersey_resized.height // 2)
                     card_img.paste(jersey_resized, (paste_x, paste_y), jersey_resized)
 
-            # Incrustation du visage par-dessus le maillot
             with Image.open(photo_path).convert("RGBA") as photo_img:
                 max_photo_w = int(w * 0.75)
                 max_photo_h = int(h * 0.50)
@@ -1159,9 +1148,10 @@ with tab_font:
 
     if all_combined_names:
         selected_preview_player = st.selectbox("Sélectionner un joueur ou joker existant :", options=all_combined_names, key="preview_player_dropdown")
-        custom_preview_name = st.text_input("Modifier le texte affiché sur la carte :", value=selected_preview_player, key="preview_custom_text_input")
+        # Le nom personnalisé a été retiré ici, on utilise directement la sélection de la liste déroulante
+        custom_preview_name = selected_preview_player
     else:
-        custom_preview_name = st.text_input("Prénom affiché sur la carte :", value="Antho", key="preview_custom_text_input_fallback")
+        custom_preview_name = "Antho"
 
     preview_font_path = st.session_state.get('active_font_path', DEFAULT_FONT_PATH)
 
