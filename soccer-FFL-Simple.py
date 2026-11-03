@@ -1314,7 +1314,7 @@ with tab2:
 
                     push_file_to_github(target_photo_path, photo_bytes, f"Mise à jour portrait recadré pour {selected_player_to_crop}")
                     st.success(f"✅ Portrait recadré et lié avec succès à **{selected_player_to_crop}** !")
-        st.rerun()
+                st.rerun()
 
         st.write("---")
         st.markdown("##### 🗑️ Gestion et suppression des portraits existants")
