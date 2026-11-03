@@ -4,13 +4,19 @@ import os
 import shutil
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageChops
 import io
 import itertools
 import re
 import base64
 from datetime import datetime
 from github import Github, GithubException
+
+try:
+    from rembg import remove
+    REMBG_AVAILABLE = True
+except ImportError:
+    REMBG_AVAILABLE = False
 
 # Fichiers et dossiers requis
 DATA_FILE = 'database_joueurs_v2.xlsx'       
@@ -126,6 +132,40 @@ def get_preview_card_path(full_card_path):
     return full_card_path
 
 sync_all_previews()
+
+# --- ANALYSE DE COULEUR DE CARTE & HARMONISATION DU MAILLOT ---
+def get_dominant_card_color(card_path):
+    try:
+        with Image.open(card_path) as card_img:
+            card_small = card_img.resize((40, 40))
+            colors = card_small.getcolors(maxcolors=2000)
+            if colors:
+                colors.sort(key=lambda x: x[0], reverse=True)
+                for _, col in colors:
+                    # Éviter le noir absolu ou le blanc pur
+                    if 30 < sum(col[:3]) < 720:
+                        return col[:3]
+        return (100, 50, 150) # Couleur par défaut (violette)
+    except Exception:
+        return (100, 50, 150)
+
+def tint_photo_to_card(photo_img, card_path):
+    """Applique une harmonisation de couleur subtile sur le portrait pour accorder le maillot à la carte"""
+    try:
+        dominant_color = get_dominant_card_color(card_path)
+        r, g, b = photo_img.convert("RGB").split()
+        
+        # Mélange subtil pour teinter les vêtements/maillot selon la couleur de la carte
+        factor = 0.25
+        r_t = r.point(lambda i: int(i * (1 - factor) + dominant_color[0] * factor))
+        g_t = g.point(lambda i: int(i * (1 - factor) + dominant_color[1] * factor))
+        b_t = b.point(lambda i: int(i * (1 - factor) + dominant_color[2] * factor))
+        
+        tinted_rgb = Image.merge("RGB", (r_t, g_t, b_t))
+        _, _, _, a = photo_img.split()
+        return Image.merge("RGBA", (*tinted_rgb.split(), a))
+    except Exception:
+        return photo_img
 
 # --- 1. CHARGEMENT DE L'ICÔNE ---
 app_icon = "⚽"
@@ -510,11 +550,14 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
 
     w, h = card_img.size
 
-    # --- 1. INCRUSTATION DE LA PHOTO ---
+    # --- 1. INCRUSTATION DE LA PHOTO & HARMONISATION COULEUR ---
     photo_path = get_player_photo_path(player_name)
     if photo_path and os.path.exists(photo_path):
         try:
             with Image.open(photo_path).convert("RGBA") as photo_img:
+                # Harmoniser la couleur du maillot selon la carte FUT
+                photo_img = tint_photo_to_card(photo_img, card_path)
+
                 max_photo_w = int(w * 0.75)
                 max_photo_h = int(h * 0.50)
                 
@@ -1144,11 +1187,12 @@ with tab2:
         all_linkable_players = sorted(list(set(reg_list + jok_list)))
 
         if all_linkable_players:
-            # --- ONGLET 1 : NOUVEL UPLOAD ---
+            # --- ONGLET 1 : NOUVEL UPLOAD AVEC SUPPRESSION DE FOND AUTOMATIQUE ---
             with st.expander("📤 1. Uploader un nouveau portrait", expanded=True):
                 selected_player_to_link = st.selectbox("Choisir le joueur ou joker à associer :", options=all_linkable_players, key="select_player_photo_link")
                 
-                # Vérification warning si une photo existe déjà
+                auto_remove_bg = st.checkbox("✂️ Supprimer automatiquement l'arrière-plan (recommandé)", value=True, key="chk_auto_remove_bg")
+
                 target_has_photo = False
                 if selected_player_to_link in reg_list:
                     p_val = st.session_state.players_df.loc[st.session_state.players_df["Nom du Joueur"] == selected_player_to_link, "Photo"].values[0]
@@ -1163,17 +1207,26 @@ with tab2:
                 if target_has_photo:
                     st.warning(f"⚠️ **Attention :** {selected_player_to_link} possède déjà un portrait associé ! L'uploarder va l'écraser.")
 
-                uploaded_photo = st.file_uploader("Sélectionner le portrait PNG transparent :", type=["png", "jpg", "jpeg"], key="upload_player_photo_file")
+                uploaded_photo = st.file_uploader("Sélectionner le portrait (PNG / JPG) :", type=["png", "jpg", "jpeg"], key="upload_player_photo_file")
 
                 if uploaded_photo is not None:
                     if st.button("🔗 Enregistrer, lier et remplir l'Excel", key="btn_link_photo_submit", type="primary"):
-                        ext = os.path.splitext(uploaded_photo.name)[1].lower()
+                        photo_bytes = uploaded_photo.getvalue()
+                        
+                        # Suppression de fond avec rembg si activé et dispo
+                        if auto_remove_bg and REMBG_AVAILABLE:
+                            try:
+                                with st.spinner("✂️ Détourage automatique de l'arrière-plan en cours..."):
+                                    photo_bytes = remove(photo_bytes)
+                            except Exception as e:
+                                st.warning(f"⚠️ Impossible de détourer automatiquement : {e}")
+
+                        ext = ".png" # Forcé en PNG pour garder la transparence
                         clean_target_name = re.sub(r'^joker\s+', '', selected_player_to_link.strip().lower())
                         file_id = get_player_id(clean_target_name)
                         new_filename = f"{file_id}{ext}"
                         target_photo_path = os.path.join(PHOTO_JOUEUR_DIR, new_filename)
                         
-                        photo_bytes = uploaded_photo.getvalue()
                         with open(target_photo_path, "wb") as f:
                             f.write(photo_bytes)
                         
@@ -1190,7 +1243,7 @@ with tab2:
                             st.session_state.jokers_editor_version += 1
 
                         push_file_to_github(target_photo_path, photo_bytes, f"Ajout portrait lié pour {selected_player_to_link}")
-                        st.success(f"✅ Portrait lié avec succès à **{selected_player_to_link}** !")
+                        st.success(f"✅ Portrait détouré et lié avec succès à **{selected_player_to_link}** !")
                         st.rerun()
 
             # --- ONGLET 2 : RÉASSOCIATION D'UN PORTRAIT EXISTANT ---
@@ -1201,7 +1254,6 @@ with tab2:
                         selected_existing_photo = st.selectbox("Choisir le fichier image existant :", options=existing_photo_files, key="select_existing_photo_file")
                         selected_new_owner = st.selectbox("Associer ce portrait au joueur / joker :", options=all_linkable_players, key="select_new_owner_dropdown")
                         
-                        # Vérification warning pour la réassociation
                         owner_has_photo = False
                         if selected_new_owner in reg_list:
                             o_val = st.session_state.players_df.loc[st.session_state.players_df["Nom du Joueur"] == selected_new_owner, "Photo"].values[0]
