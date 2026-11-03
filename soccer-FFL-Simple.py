@@ -1313,8 +1313,8 @@ with tab2:
                         st.session_state.jokers_editor_version += 1
 
                     push_file_to_github(target_photo_path, photo_bytes, f"Mise à jour portrait recadré pour {selected_player_to_crop}")
-                    st.success(f"✅ Portrait recadré et lié avec succès à **{selected_player_to_crop** !")
-                    st.rerun()
+                    st.success(f"✅ Portrait recadré et lié avec succès à **{selected_player_to_crop}** !")
+        st.rerun()
 
         st.write("---")
         st.markdown("##### 🗑️ Gestion et suppression des portraits existants")
