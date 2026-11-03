@@ -773,17 +773,11 @@ tab1, tab_hist, tab_font, tab2 = st.tabs(["⚖️ Équilibrage du Jour", "📜 H
 # ==========================================
 with tab1:
     with st.expander("📋 Analyser une convocation WhatsApp (Optionnel)", expanded=False):
-        convoc_text = st.text_area(
-            "Colle le texte brut de ta convocation ici :", 
-            height=150, 
-            placeholder="Présents :\nNico P (1), Cédric (2)..."
-        )
-        
+        convoc_text = st.text_area("Colle le texte brut de ta convocation ici :", height=150)
         if st.button("🔍 Extraire et Valider les Joueurs"):
             if convoc_text.strip():
                 match_presents = re.search(r"présents?\b[:\-\s]*(.*)", convoc_text, re.IGNORECASE | re.DOTALL)
                 target_text = match_presents.group(1) if match_presents else convoc_text
-
                 stop_pattern = r"\n\s*(jokers?|absents?|infirmerie|en attente|à confirmer|a confirmer)\b"
                 target_text = re.split(stop_pattern, target_text, flags=re.IGNORECASE)[0]
                 target_text = re.sub(r"\)\s*(?=[a-zA-ZÀ-ÿ])", "), ", target_text)
@@ -794,44 +788,24 @@ with tab1:
                     s = re.sub(r"\(\s*\d+\s*\)", "", seg)
                     s = re.sub(r"^\s*[\d\.\-\*\•\:]+\s*", "", s)
                     s = s.strip()
-                    if s:
-                        cleaned_names.append(s)
+                    if s: cleaned_names.append(s)
 
                 df_db = st.session_state.players_df
                 alias_map = {}
                 for _, row in df_db.iterrows():
                     real_name = str(row["Nom du Joueur"]).strip()
                     alias_map.setdefault(real_name.lower(), []).append(real_name)
-                    surnoms = [sn.strip().lower() for sn in str(row.get("Surnoms", "")).split(",") if sn.strip()]
-                    for sn in surnoms:
-                        if real_name not in alias_map.setdefault(sn, []):
-                            alias_map[sn].append(real_name)
+                    for sn in [s.strip().lower() for s in str(row.get("Surnoms", "")).split(",") if s.strip()]:
+                        if real_name not in alias_map.setdefault(sn, []): alias_map[sn].append(real_name)
 
                 found_players = set()
-                unknown_names = []
-                ambiguous_matches = []
-
                 for candidate in cleaned_names:
-                    key = candidate.lower()
-                    if key in alias_map:
-                        matches = alias_map[key]
-                        if len(matches) == 1:
-                            found_players.add(matches[0])
-                        else:
-                            ambiguous_matches.append({
-                                "convoc_name": candidate,
-                                "candidates": matches
-                            })
-                    else:
-                        unknown_names.append(candidate)
+                    if candidate.lower() in alias_map and len(alias_map[candidate.lower()]) == 1:
+                        found_players.add(alias_map[candidate.lower()][0])
 
                 st.session_state.auto_selected = found_players
-                st.session_state.unknown_names = unknown_names
-                st.session_state.ambiguous_matches = ambiguous_matches
-
                 for p_name in df_db["Nom du Joueur"].dropna().unique():
                     st.session_state[f"chk_p_{p_name}"] = (p_name in found_players)
-
                 st.rerun()
 
     st.subheader("1. Sélection des joueurs réguliers présents")
@@ -877,7 +851,6 @@ with tab1:
         with st.expander("➕ Ajouter un Joker au match", expanded=True):
             jokers_db = st.session_state.jokers_db
             has_db_jokers = not jokers_db.empty and "Nom Joker" in jokers_db.columns
-            
             mode_choice = st.radio("Source du Joker :", ["Sélectionner depuis la BDD Jokers", "Saisir un nouveau Joker"] if has_db_jokers else ["Saisir un nouveau Joker"], horizontal=True)
             
             if mode_choice == "Sélectionner depuis la BDD Jokers":
@@ -1048,7 +1021,7 @@ with tab_font:
             st.rerun()
 
 # ==========================================
-# 🏃 TAB 2 : GESTION DES BASES & PHOTOS (LIENS À L'UPLOAD)
+# 🏃 TAB 2 : GESTION DES BASES & PHOTOS
 # ==========================================
 with tab2:
     st.header("Gestion des Bases de Données & Liaison des Portraits")
@@ -1085,9 +1058,8 @@ with tab2:
             st.rerun()
 
     with subtab_photos:
-        st.subheader("📸 Uploader et lier un portrait transparent")
+        st.subheader("📸 Uploader, Lier ou Remplacer un portrait transparent")
         
-        # Liste combinée des joueurs (réguliers + jokers) pour l'association
         reg_list = st.session_state.players_df["Nom du Joueur"].tolist() if not st.session_state.players_df.empty else []
         jok_list = [f"Joker {j}" for j in st.session_state.jokers_db["Nom Joker"].tolist()] if not st.session_state.jokers_db.empty and "Nom Joker" in st.session_state.jokers_db.columns else []
         all_linkable_players = sorted(list(set(reg_list + jok_list)))
@@ -1099,8 +1071,6 @@ with tab2:
             if uploaded_photo is not None:
                 if st.button("🔗 Enregistrer, lier et remplir l'Excel", type="primary"):
                     ext = os.path.splitext(uploaded_photo.name)[1].lower()
-                    
-                    # Détermination de l'ID / nom de fichier standardisé
                     clean_target_name = re.sub(r'^joker\s+', '', selected_player_to_link.strip().lower())
                     file_id = get_player_id(clean_target_name)
                     new_filename = f"{file_id}{ext}"
@@ -1110,7 +1080,6 @@ with tab2:
                     with open(target_photo_path, "wb") as f:
                         f.write(photo_bytes)
                     
-                    # Mise à jour automatique de la base Excel correspondante
                     if selected_player_to_link in reg_list:
                         idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == selected_player_to_link].index[0]
                         st.session_state.players_df.loc[idx, "Photo"] = new_filename
@@ -1124,18 +1093,54 @@ with tab2:
                         st.session_state.jokers_editor_version += 1
 
                     push_file_to_github(target_photo_path, photo_bytes, f"Ajout portrait lié pour {selected_player_to_link}")
-                    st.success(f"✅ Portrait lié avec succès à **{selected_player_to_link}** et enregistré dans l'Excel !")
+                    st.success(f"✅ Portrait lié avec succès à **{selected_player_to_link}** !")
                     st.rerun()
         else:
-            st.warning("Veuillez d'abord créer des joueurs dans la base pour pouvoir y lier des photos.")
+            st.warning("Veuillez d'abord créer des joueurs dans la base.")
 
-        st.markdown("##### 📋 Portraits actuellement enregistrés et liés :")
+        st.write("---")
+        st.markdown("##### 🗑️ Gestion des portraits existants (Supprimer / Remplacer)")
         if os.path.exists(PHOTO_JOUEUR_DIR):
-            files = os.listdir(PHOTO_JOUEUR_DIR)
-            if files:
-                p_cols = st.columns(4)
-                for idx_ph, p_file in enumerate(files):
-                    with p_cols[idx_ph % 4]:
-                        st.image(os.path.join(PHOTO_JOUEUR_DIR, p_file), caption=p_file, width=80)
+            existing_photos = [f for f in os.listdir(PHOTO_JOUEUR_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+            if existing_photos:
+                p_cols = st.columns(3)
+                for idx_ph, p_file in enumerate(existing_photos):
+                    with p_cols[idx_ph % 3]:
+                        full_path = os.path.join(PHOTO_JOUEUR_DIR, p_file)
+                        st.image(full_path, caption=p_file, width=100)
+                        
+                        # Trouver quel joueur utilise cette photo
+                        matched_player = "Aucun"
+                        for p in reg_list:
+                            if get_player_photo_path(p) == full_path:
+                                matched_player = f"Joueur: {p}"
+                                break
+                        if matched_player == "Aucun":
+                            for j in jok_list:
+                                if get_player_photo_path(j) == full_path:
+                                    matched_player = f"Joker: {j}"
+                                    break
+                        st.caption(f"Lié à : **{matched_player}**")
+
+                        if st.button(f"🗑️ Supprimer ce portrait", key=f"del_photo_{p_file}"):
+                            # 1. Supprimer le fichier
+                            try:
+                                os.remove(full_path)
+                            except Exception:
+                                pass
+                            
+                            # 2. Nettoyer la référence dans les bases Excel
+                            if not st.session_state.players_df.empty and "Photo" in st.session_state.players_df.columns:
+                                st.session_state.players_df.loc[st.session_state.players_df["Photo"] == p_file, "Photo"] = ""
+                                save_data(st.session_state.players_df)
+                                st.session_state.db_editor_version += 1
+
+                            if not st.session_state.jokers_db.empty and "Photo" in st.session_state.jokers_db.columns:
+                                st.session_state.jokers_db.loc[st.session_state.jokers_db["Photo"] == p_file, "Photo"] = ""
+                                save_jokers_db(st.session_state.jokers_db)
+                                st.session_state.jokers_editor_version += 1
+
+                            st.success(f"Portrait **{p_file}** supprimé et dissocié !")
+                            st.rerun()
             else:
-                st.info("Aucun portrait dans le dossier.")
+                st.info("Aucun portrait enregistré pour le moment.")
