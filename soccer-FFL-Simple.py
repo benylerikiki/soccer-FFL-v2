@@ -9,6 +9,7 @@ import io
 import itertools
 import re
 import base64
+import colorsys
 from datetime import datetime
 from github import Github, GithubException
 
@@ -24,12 +25,14 @@ FUT_CARDS_DIR = 'cards_fut'
 CARTE_FUT_DIR = 'carte_fut'  
 CARTE_FUT_PREV_DIR = 'cartes_fut_prev'
 PHOTO_JOUEUR_DIR = 'photo_joueur'
+MAILLOTS_DIR = 'maillots'  # Dossier dédié aux maillots
 FONTS_DIR = 'fonts'
 
 os.makedirs(FUT_CARDS_DIR, exist_ok=True)
 os.makedirs(CARTE_FUT_DIR, exist_ok=True)
 os.makedirs(CARTE_FUT_PREV_DIR, exist_ok=True)
 os.makedirs(PHOTO_JOUEUR_DIR, exist_ok=True)
+os.makedirs(MAILLOTS_DIR, exist_ok=True)
 os.makedirs(FONTS_DIR, exist_ok=True)
 
 if os.path.exists(DEFAULT_FONT_PATH):
@@ -89,14 +92,6 @@ def text_to_score(val):
         return max(1, min(10, int(match.group())))
     return 5
 
-def calculate_global_score(row):
-    att = text_to_score(row.get("Attaque", 5))
-    defe = text_to_score(row.get("Défense", 5))
-    gk = text_to_score(row.get("Gardien", 1))
-    col = text_to_score(row.get("Collectif", 5))
-    avg = (att + defe + gk + col) / 4.0
-    return round(avg, 1)
-
 def get_card_generation(filename):
     base = os.path.basename(filename).lower()
     match = re.search(r'(fut[-]?\d+|fifa[-]?\d+|toty[-]?\d+|tots[-]?\d+|hero[-]?\d+|fc[-]?\d+)', base)
@@ -127,7 +122,82 @@ def get_preview_card_path(full_card_path):
 
 sync_all_previews()
 
-# --- 1. CHARGEMENT DE L'ICÔNE ---
+# --- ANALYSE DE COULEUR & GESTION DES MAILLOTS (OPTION 2 DYNAMIQUE) ---
+def get_dominant_card_color(card_path):
+    try:
+        with Image.open(card_path) as card_img:
+            card_small = card_img.resize((40, 40))
+            colors = card_small.getcolors(maxcolors=2000)
+            if colors:
+                colors.sort(key=lambda x: x[0], reverse=True)
+                for _, col in colors:
+                    if 30 < sum(col[:3]) < 720:
+                        return col[:3]
+        return (100, 50, 150)
+    except Exception:
+        return (100, 50, 150)
+
+def get_matching_jersey(card_path):
+    """
+    Associe la carte à un maillot existant dans le dossier maillots, 
+    ou en génère un dynamiquement par couleur si aucun ne correspond directement.
+    """
+    card_filename = os.path.basename(card_path).lower()
+    
+    # 1. Recherche d'une correspondance par nom dans le dossier maillots
+    keywords = {
+        'bleu': ['blue', 'bleu'],
+        'rouge': ['red', 'rouge'],
+        'violet': ['purple', 'violet'],
+        'orange': ['orange'],
+        'vert': ['green', 'vert'],
+        'or': ['gold', 'or', 'toty'],
+        'noir_blanc': ['black_white', 'noir_blanc'],
+        'blanc_noir': ['white_black', 'blanc_noir']
+    }
+    
+    for color_name, aliases in keywords.items():
+        if any(alias in card_filename for alias in aliases):
+            j_path = os.path.join(MAILLOTS_DIR, f"maillot_{color_name}.png")
+            if os.path.exists(j_path):
+                return j_path
+
+    # 2. Si aucune correspondance exacte, génération dynamique basée sur la couleur dominante
+    card_id = os.path.splitext(os.path.basename(card_path))[0]
+    dynamic_jersey_path = os.path.join(MAILLOTS_DIR, f"maillot_dynamic_{card_id}.png")
+    
+    if os.path.exists(dynamic_jersey_path):
+        return dynamic_jersey_path
+        
+    dominant_color = get_dominant_card_color(card_path)
+    base_jersey_path = os.path.join(MAILLOTS_DIR, "maillot_blanc_noir.png")
+    
+    if not os.path.exists(base_jersey_path):
+        # Fallback si le maillot de base n'existe pas encore
+        return card_path 
+        
+    try:
+        with Image.open(base_jersey_path).convert("RGBA") as jersey:
+            pixels = jersey.load()
+            width, height = jersey.size
+            new_jersey = Image.new("RGBA", (width, height))
+            new_pixels = new_jersey.load()
+            
+            for x in range(width):
+                for y in range(height):
+                    r, g, b, a = pixels[x, y]
+                    # Si le pixel est clair (blanc du maillot), on le colorise avec la teinte de la carte
+                    if r > 200 and g > 200 and b > 200:
+                        new_pixels[x, y] = (dominant_color[0], dominant_color[1], dominant_color[2], a)
+                    else:
+                        new_pixels[x, y] = (r, g, b, a)
+            
+            new_jersey.save(dynamic_jersey_path)
+            return dynamic_jersey_path
+    except Exception:
+        return base_jersey_path
+
+# --- CONFIGURATION DE LA PAGE ---
 app_icon = "⚽"
 if os.path.exists(LOGO_PATH):
     try:
@@ -141,118 +211,13 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- GESTION DE L'ÉTAPE DE LANDING ---
-if "enter" in st.query_params:
-    st.session_state['show_landing'] = False
-
+# --- INITIALISATION SÉCURISÉE DES ÉTATS ---
 if 'show_landing' not in st.session_state:
     st.session_state['show_landing'] = True
 
-# --- 2. CSS & STYLES ---
-if os.path.exists(LOGO_PATH):
-    with open(LOGO_PATH, "rb") as f:
-        icon_bytes = f.read()
-    icon_b64 = base64.b64encode(icon_bytes).decode('utf-8')
-    
-    pwa_javascript_fix = f"""
-        <script>
-            var link = document.querySelector("link[rel*='icon']") || document.createElement('link');
-            link.type = 'image/png';
-            link.rel = 'shortcut icon';
-            link.href = 'data:image/png;base64,{icon_b64}';
-            document.getElementsByTagName('head')[0].appendChild(link);
+if "enter" in st.query_params:
+    st.session_state['show_landing'] = False
 
-            var appleLink = document.createElement('link');
-            appleLink.rel = 'apple-touch-icon';
-            appleLink.sizes = '180x180';
-            appleLink.href = 'data:image/png;base64,{icon_b64}';
-            document.getElementsByTagName('head')[0].appendChild(appleLink);
-        </script>
-    """
-    st.markdown(pwa_javascript_fix, unsafe_allow_html=True)
-
-st.markdown(
-    """
-    <style>
-    div[data-testid="stImage"] img {
-        object-fit: contain !important;
-        max-width: 130px !important;
-        height: auto !important;
-        margin: 0 auto !important;
-        display: block !important;
-    }
-
-    @media (max-width: 768px) {
-        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) {
-            display: grid !important;
-            grid-template-columns: repeat(3, 1fr) !important;
-            gap: 8px !important;
-        }
-        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) > div[data-testid="stColumn"] {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            flex: none !important;
-        }
-        div[data-testid="stCheckbox"] label {
-            font-size: 13px !important;
-        }
-    }
-
-    .landing-card-container {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        width: 100%;
-        margin-top: 20px;
-    }
-
-    .landing-card {
-        display: inline-flex;
-        flex-direction: column;
-        max-width: 650px;
-        width: 100%;
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.6);
-        background-color: #1e1e1e;
-    }
-
-    .landing-card img {
-        width: 100%;
-        height: auto;
-        display: block;
-        object-fit: contain;
-    }
-
-    .landing-card a.landing-btn {
-        display: block;
-        width: 100%;
-        background-color: #28a745;
-        color: white !important;
-        text-align: center;
-        font-size: 20px;
-        font-weight: bold;
-        padding: 16px 0;
-        text-decoration: none !important;
-        transition: background-color 0.2s ease, transform 0.1s ease;
-        box-sizing: border-box;
-    }
-
-    .landing-card a.landing-btn:hover {
-        background-color: #218838;
-        color: white !important;
-    }
-
-    .landing-card a.landing-btn:active {
-        transform: scale(0.99);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# --- INITIALISATION DE SESSION ---
 if 'db_editor_version' not in st.session_state:
     st.session_state['db_editor_version'] = 0
 
@@ -470,6 +435,112 @@ if 'jokers_db' not in st.session_state:
     st.session_state.jokers_db = load_jokers_db()
 
 # ==========================================
+# 2. CSS & STYLES
+# ==========================================
+if os.path.exists(LOGO_PATH):
+    with open(LOGO_PATH, "rb") as f:
+        icon_bytes = f.read()
+    icon_b64 = base64.b64encode(icon_bytes).decode('utf-8')
+    
+    pwa_javascript_fix = f"""
+        <script>
+            var link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+            link.type = 'image/png';
+            link.rel = 'shortcut icon';
+            link.href = 'data:image/png;base64,{icon_b64}';
+            document.getElementsByTagName('head')[0].appendChild(link);
+
+            var appleLink = document.createElement('link');
+            appleLink.rel = 'apple-touch-icon';
+            appleLink.sizes = '180x180';
+            appleLink.href = 'data:image/png;base64,{icon_b64}';
+            document.getElementsByTagName('head')[0].appendChild(appleLink);
+        </script>
+    """
+    st.markdown(pwa_javascript_fix, unsafe_allow_html=True)
+
+st.markdown(
+    """
+    <style>
+    div[data-testid="stImage"] img {
+        object-fit: contain !important;
+        max-width: 130px !important;
+        height: auto !important;
+        margin: 0 auto !important;
+        display: block !important;
+    }
+
+    @media (max-width: 768px) {
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) {
+            display: grid !important;
+            grid-template-columns: repeat(3, 1fr) !important;
+            gap: 8px !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stCheckbox"]) > div[data-testid="stColumn"] {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            flex: none !important;
+        }
+        div[data-testid="stCheckbox"] label {
+            font-size: 13px !important;
+        }
+    }
+
+    .landing-card-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        margin-top: 20px;
+    }
+
+    .landing-card {
+        display: inline-flex;
+        flex-direction: column;
+        max-width: 650px;
+        width: 100%;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+        background-color: #1e1e1e;
+    }
+
+    .landing-card img {
+        width: 100%;
+        height: auto;
+        display: block;
+        object-fit: contain;
+    }
+
+    .landing-card a.landing-btn {
+        display: block;
+        width: 100%;
+        background-color: #28a745;
+        color: white !important;
+        text-align: center;
+        font-size: 20px;
+        font-weight: bold;
+        padding: 16px 0;
+        text-decoration: none !important;
+        transition: background-color 0.2s ease, transform 0.1s ease;
+        box-sizing: border-box;
+    }
+
+    .landing-card a.landing-btn:hover {
+        background-color: #218838;
+        color: white !important;
+    }
+
+    .landing-card a.landing-btn:active {
+        transform: scale(0.99);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# ==========================================
 # 🖼️ PAGE DE GARDE
 # ==========================================
 if st.session_state.get('show_landing', True):
@@ -510,10 +581,25 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
 
     w, h = card_img.size
 
-    # --- 1. INCRUSTATION DE LA PHOTO ---
+    # --- 1. INCRUSTATION DU MAILLOT & DE LA PHOTO DU JOUEUR ---
     photo_path = get_player_photo_path(player_name)
     if photo_path and os.path.exists(photo_path):
         try:
+            # Récupération du maillot adapté à la couleur de la carte
+            jersey_path = get_matching_jersey(card_path)
+            if jersey_path and os.path.exists(jersey_path):
+                with Image.open(jersey_path).convert("RGBA") as jersey_img:
+                    max_j_w = int(w * 0.75)
+                    max_j_h = int(h * 0.50)
+                    j_w, j_h = jersey_img.size
+                    ratio_j = min(max_j_w / j_w, max_j_h / j_h)
+                    jersey_resized = jersey_img.resize((int(j_w * ratio_j), int(j_h * ratio_j)), Image.Resampling.LANCZOS)
+                    
+                    paste_x = (w - jersey_resized.width) // 2
+                    paste_y = int(h * 0.38) - (jersey_resized.height // 2)
+                    card_img.paste(jersey_resized, (paste_x, paste_y), jersey_resized)
+
+            # Incrustation du visage par-dessus le maillot
             with Image.open(photo_path).convert("RGBA") as photo_img:
                 max_photo_w = int(w * 0.75)
                 max_photo_h = int(h * 0.50)
@@ -1137,18 +1223,16 @@ with tab2:
             st.rerun()
 
     with subtab_photos:
-        st.subheader("📸 Uploader, Lier ou Réassocier un portrait transparent")
+        st.subheader("📸 Uploader, Lier ou Réassocier un portrait")
         
         reg_list = st.session_state.players_df["Nom du Joueur"].tolist() if not st.session_state.players_df.empty else []
         jok_list = [f"Joker {j}" for j in st.session_state.jokers_db["Nom Joker"].tolist()] if not st.session_state.jokers_db.empty and "Nom Joker" in st.session_state.jokers_db.columns else []
         all_linkable_players = sorted(list(set(reg_list + jok_list)))
 
         if all_linkable_players:
-            # --- ONGLET 1 : NOUVEL UPLOAD ---
             with st.expander("📤 1. Uploader un nouveau portrait", expanded=True):
                 selected_player_to_link = st.selectbox("Choisir le joueur ou joker à associer :", options=all_linkable_players, key="select_player_photo_link")
                 
-                # Vérification warning si une photo existe déjà
                 target_has_photo = False
                 if selected_player_to_link in reg_list:
                     p_val = st.session_state.players_df.loc[st.session_state.players_df["Nom du Joueur"] == selected_player_to_link, "Photo"].values[0]
@@ -1163,7 +1247,7 @@ with tab2:
                 if target_has_photo:
                     st.warning(f"⚠️ **Attention :** {selected_player_to_link} possède déjà un portrait associé ! L'uploarder va l'écraser.")
 
-                uploaded_photo = st.file_uploader("Sélectionner le portrait PNG transparent :", type=["png", "jpg", "jpeg"], key="upload_player_photo_file")
+                uploaded_photo = st.file_uploader("Sélectionner le portrait (PNG / JPG) :", type=["png", "jpg", "jpeg"], key="upload_player_photo_file")
 
                 if uploaded_photo is not None:
                     if st.button("🔗 Enregistrer, lier et remplir l'Excel", key="btn_link_photo_submit", type="primary"):
@@ -1193,7 +1277,6 @@ with tab2:
                         st.success(f"✅ Portrait lié avec succès à **{selected_player_to_link}** !")
                         st.rerun()
 
-            # --- ONGLET 2 : RÉASSOCIATION D'UN PORTRAIT EXISTANT ---
             with st.expander("🔄 2. Réassocier un portrait existant (sans ré-uploader)", expanded=False):
                 if os.path.exists(PHOTO_JOUEUR_DIR):
                     existing_photo_files = [f for f in os.listdir(PHOTO_JOUEUR_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
@@ -1201,7 +1284,6 @@ with tab2:
                         selected_existing_photo = st.selectbox("Choisir le fichier image existant :", options=existing_photo_files, key="select_existing_photo_file")
                         selected_new_owner = st.selectbox("Associer ce portrait au joueur / joker :", options=all_linkable_players, key="select_new_owner_dropdown")
                         
-                        # Vérification warning pour la réassociation
                         owner_has_photo = False
                         if selected_new_owner in reg_list:
                             o_val = st.session_state.players_df.loc[st.session_state.players_df["Nom du Joueur"] == selected_new_owner, "Photo"].values[0]
