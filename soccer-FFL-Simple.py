@@ -44,7 +44,7 @@ def resize_and_save_preview(source_path, target_dir=CARTE_FUT_PREV_DIR, target_w
     try:
         filename = os.path.basename(source_path)
         target_path = os.path.join(target_dir, filename)
-        if not os.path.exists(target_path) or os.path.getmtime(source_path) > os.path.getmtime(target_path):
+        if not os.path.exists(target_path):
             with Image.open(source_path) as img:
                 w_percent = (target_width / float(img.size[0]))
                 h_size = int(float(img.size[1]) * float(w_percent))
@@ -121,24 +121,11 @@ def get_preview_card_path(full_card_path):
 
 sync_all_previews()
 
-# --- ANALYSE DE COULEUR & GESTION DES MAILLOTS ---
-def get_dominant_card_color(card_path):
-    try:
-        with Image.open(card_path) as card_img:
-            card_small = card_img.resize((40, 40))
-            colors = card_small.getcolors(maxcolors=2000)
-            if colors:
-                colors.sort(key=lambda x: x[0], reverse=True)
-                for _, col in colors:
-                    if 30 < sum(col[:3]) < 720:
-                        return col[:3]
-        return (100, 50, 150)
-    except Exception:
-        return (100, 50, 150)
-
+# --- SÉLECTION DU MAILLOT LE PLUS PROCHE ---
 def get_matching_jersey(card_path):
     card_filename = os.path.basename(card_path).lower()
     
+    # Mots-clés pour associer la carte au maillot correspondant dans le dossier maillots/
     keywords = {
         'bleu': ['blue', 'bleu'],
         'rouge': ['red', 'rouge'],
@@ -156,37 +143,12 @@ def get_matching_jersey(card_path):
             if os.path.exists(j_path):
                 return j_path
 
-    card_id = os.path.splitext(os.path.basename(card_path))[0]
-    dynamic_jersey_path = os.path.join(MAILLOTS_DIR, f"maillot_dynamic_{card_id}.png")
-    
-    if os.path.exists(dynamic_jersey_path):
-        return dynamic_jersey_path
+    # Fallback par défaut sur le maillot blanc & noir si aucun mot-clé ne correspond
+    default_jersey = os.path.join(MAILLOTS_DIR, "maillot_blanc_noir.png")
+    if os.path.exists(default_jersey):
+        return default_jersey
         
-    dominant_color = get_dominant_card_color(card_path)
-    base_jersey_path = os.path.join(MAILLOTS_DIR, "maillot_blanc_noir.png")
-    
-    if not os.path.exists(base_jersey_path):
-        return card_path 
-        
-    try:
-        with Image.open(base_jersey_path).convert("RGBA") as jersey:
-            pixels = jersey.load()
-            width, height = jersey.size
-            new_jersey = Image.new("RGBA", (width, height))
-            new_pixels = new_jersey.load()
-            
-            for x in range(width):
-                for y in range(height):
-                    r, g, b, a = pixels[x, y]
-                    if r > 200 and g > 200 and b > 200:
-                        new_pixels[x, y] = (dominant_color[0], dominant_color[1], dominant_color[2], a)
-                    else:
-                        new_pixels[x, y] = (r, g, b, a)
-            
-            new_jersey.save(dynamic_jersey_path)
-            return dynamic_jersey_path
-    except Exception:
-        return base_jersey_path
+    return None
 
 # --- CONFIGURATION DE LA PAGE ---
 app_icon = "⚽"
@@ -560,7 +522,7 @@ if st.session_state.get('show_landing', True):
     st.stop()
 
 # ==========================================
-# ⚽ RENDU DU TERRAIN & INCRUSTATION PHOTO
+# ⚽ RENDU DU TERRAIN & INCRUSTATION CARTE
 # ==========================================
 def create_player_card(card_path, player_name, is_custom_fut=False, override_font_path=None):
     if not os.path.exists(card_path):
@@ -572,11 +534,11 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
 
     w, h = card_img.size
 
-    # --- 1. INCRUSTATION DU MAILLOT & DU VISAGE DÉTOURÉ ---
+    # --- 1. INCRUSTATION DU MAILLOT & DU VISAGE ---
     photo_path = get_player_photo_path(player_name)
     if photo_path and os.path.exists(photo_path):
         try:
-            # 1. Pose du maillot
+            # 1. Pose du maillot adapté
             jersey_path = get_matching_jersey(card_path)
             if jersey_path and os.path.exists(jersey_path):
                 with Image.open(jersey_path).convert("RGBA") as jersey_img:
@@ -590,7 +552,7 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
                     paste_y = int(h * 0.38) - (jersey_resized.height // 2)
                     card_img.paste(jersey_resized, (paste_x, paste_y), jersey_resized)
 
-            # 2. Pose du visage (déjà détouré en ovale propre)
+            # 2. Pose du visage (recadré et détouré en ovale)
             with Image.open(photo_path).convert("RGBA") as photo_img:
                 ph_w, ph_h = photo_img.size
                 max_photo_w = int(w * 0.60)
@@ -1222,7 +1184,6 @@ with tab2:
         if all_linkable_players:
             selected_player_to_crop = st.selectbox("Choisir le joueur ou joker à cadrer :", options=all_linkable_players, key="select_player_crop_target")
             
-            # Source de l'image : soit upload d'une nouvelle photo, soit sélection d'une photo existante
             source_choice = st.radio("Source de l'image :", ["Uploader une nouvelle photo", "Utiliser une photo déjà sur le serveur"], horizontal=True, key="crop_source_radio")
             
             raw_img_to_process = None
@@ -1255,7 +1216,6 @@ with tab2:
                     crop_radius_x = st.slider("Largeur de l'ovale", min_value=20, max_value=img_w // 2, value=int(img_w * 0.30), key="slider_crop_rx")
                     crop_radius_y = st.slider("Hauteur de l'ovale", min_value=20, max_value=img_h // 2, value=int(img_h * 0.35), key="slider_crop_ry")
 
-                # Génération de l'aperçu en temps réel avec l'ovale dessiné par-dessus
                 preview_img = raw_img_to_process.copy()
                 draw_prev = ImageDraw.Draw(preview_img)
                 box_coords = [
@@ -1270,25 +1230,21 @@ with tab2:
                     st.image(preview_img, caption="Aperçu du cadrage (le contour vert = l'ovale conservé)", use_container_width=True)
 
                 if st.button("✂️ Valider et Enregistrer ce portrait propre", type="primary", key="btn_validate_crop"):
-                    # Création du masque ovale
                     mask = Image.new("L", (img_w, img_h), 0)
                     draw_mask = ImageDraw.Draw(mask)
                     draw_mask.ellipse(box_coords, fill=255)
                     
-                    # Découpage et application de la transparence
                     cropped_face = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
                     cropped_face.paste(raw_img_to_process, (0, 0))
                     cropped_face.putalpha(mask)
                     
-                    # On rogne serré autour de l'ovale pour un fichier propre
                     bbox = mask.getbbox()
                     if bbox:
                         cropped_face = cropped_face.crop(bbox)
 
-                    # Sauvegarde finale
                     clean_target_name = re.sub(r'^joker\s+', '', selected_player_to_crop.strip().lower())
                     file_id = get_player_id(clean_target_name)
-                    ext = ".png" # On sauvegarde en PNG transparent
+                    ext = ".png"
                     new_filename = f"{file_id}{ext}"
                     target_photo_path = os.path.join(PHOTO_JOUEUR_DIR, new_filename)
                     
@@ -1299,7 +1255,6 @@ with tab2:
                     with open(target_photo_path, "wb") as f:
                         f.write(photo_bytes)
                     
-                    # Liaison avec le joueur ou joker dans la base
                     if selected_player_to_crop in reg_list:
                         idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == selected_player_to_crop].index[0]
                         st.session_state.players_df.loc[idx, "Photo"] = new_filename
@@ -1314,7 +1269,7 @@ with tab2:
 
                     push_file_to_github(target_photo_path, photo_bytes, f"Mise à jour portrait recadré pour {selected_player_to_crop}")
                     st.success(f"✅ Portrait recadré et lié avec succès à **{selected_player_to_crop}** !")
-                st.rerun()
+                    st.rerun()
 
         st.write("---")
         st.markdown("##### 🗑️ Gestion et suppression des portraits existants")
