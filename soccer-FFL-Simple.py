@@ -966,31 +966,6 @@ with tab1:
             'joker': st.session_state.get('global_card_joker', 'card_yellow.png')
         }
 
-    # --- PRÉVISUALISATION EN TEMPS RÉEL AVEC PERSONNALISATION DU PRÉNOM ---
-    st.markdown("##### 👁️ Aperçu en direct des cartes sélectionnées pour le match :")
-    preview_name_tab1 = st.text_input("Modifier le prénom affiché sur l'aperçu :", value=all_match_names[0] if all_match_names else "Antho", key="preview_custom_name_input")
-    preview_font_path = st.session_state.get('active_font_path', DEFAULT_FONT_PATH)
-
-    prev_cols = st.columns(3)
-    cards_preview_meta = [
-        ("🔵 Équipe 1", main_override_cards['t1'] if main_override_cards else 'card_blue.png'),
-        ("🔴 Équipe 2", main_override_cards['t2'] if main_override_cards else 'card_red.png'),
-        ("🃏 Jokers", main_override_cards['joker'] if main_override_cards else 'card_yellow.png')
-    ]
-
-    for idx_p, (c_label, c_path) in enumerate(cards_preview_meta):
-        with prev_cols[idx_p]:
-            st.caption(f"**{c_label}**")
-            prev_file_path = get_preview_card_path(c_path)
-            if os.path.exists(prev_file_path):
-                img_prev = create_player_card(prev_file_path, preview_name_tab1, is_custom_fut=False, override_font_path=preview_font_path)
-                if img_prev:
-                    st.image(img_prev, use_container_width=False)
-                else:
-                    st.warning("Erreur rendu")
-            else:
-                st.info("Introuvable")
-
     st.write("---")
 
     if st.button("⚡ Générer l'Équilibrage Parfait", key="btn_generate_teams_tab1", type="primary"):
@@ -1089,6 +1064,41 @@ with tab_font:
                 st.success(f"✅ Pack aléatoire de la génération **{selected_gen_global}** appliqué !")
                 st.rerun()
 
+    st.write("---")
+    st.subheader("👁️ Prévisualisation complète & Test des Cartes")
+    
+    reg_list_all = st.session_state.players_df["Nom du Joueur"].tolist() if not st.session_state.players_df.empty else []
+    jok_list_all = [f"Joker {j}" for j in st.session_state.jokers_db["Nom Joker"].tolist()] if not st.session_state.jokers_db.empty and "Nom Joker" in st.session_state.jokers_db.columns else []
+    all_combined_names = sorted(list(set(reg_list_all + jok_list_all)))
+
+    if all_combined_names:
+        selected_preview_player = st.selectbox("Sélectionner un joueur ou joker existant :", options=all_combined_names, key="preview_player_dropdown")
+        custom_preview_name = st.text_input("Modifier le texte affiché sur la carte :", value=selected_preview_player, key="preview_custom_text_input")
+    else:
+        custom_preview_name = st.text_input("Prénom affiché sur la carte :", value="Antho", key="preview_custom_text_input_fallback")
+
+    preview_font_path = st.session_state.get('active_font_path', DEFAULT_FONT_PATH)
+
+    prev_cols = st.columns(3)
+    cards_preview_meta = [
+        ("🔵 Équipe 1 (Global)", st.session_state.get('global_card_t1', 'card_blue.png')),
+        ("🔴 Équipe 2 (Global)", st.session_state.get('global_card_t2', 'card_red.png')),
+        ("🃏 Jokers (Global)", st.session_state.get('global_card_joker', 'card_yellow.png'))
+    ]
+
+    for idx_p, (c_label, c_path) in enumerate(cards_preview_meta):
+        with prev_cols[idx_p]:
+            st.caption(f"**{c_label}**")
+            prev_file_path = get_preview_card_path(c_path)
+            if os.path.exists(prev_file_path):
+                img_prev = create_player_card(prev_file_path, custom_preview_name, is_custom_fut=False, override_font_path=preview_font_path)
+                if img_prev:
+                    st.image(img_prev, use_container_width=False)
+                else:
+                    st.warning("Erreur rendu")
+            else:
+                st.info("Introuvable")
+
 # ==========================================
 # 🏃 TAB 2 : GESTION DES BASES & PHOTOS
 # ==========================================
@@ -1127,48 +1137,107 @@ with tab2:
             st.rerun()
 
     with subtab_photos:
-        st.subheader("📸 Uploader, Lier ou Remplacer un portrait transparent")
+        st.subheader("📸 Uploader, Lier ou Réassocier un portrait transparent")
         
         reg_list = st.session_state.players_df["Nom du Joueur"].tolist() if not st.session_state.players_df.empty else []
         jok_list = [f"Joker {j}" for j in st.session_state.jokers_db["Nom Joker"].tolist()] if not st.session_state.jokers_db.empty and "Nom Joker" in st.session_state.jokers_db.columns else []
         all_linkable_players = sorted(list(set(reg_list + jok_list)))
 
         if all_linkable_players:
-            selected_player_to_link = st.selectbox("1. Choisir le joueur ou joker à associer :", options=all_linkable_players, key="select_player_photo_link")
-            uploaded_photo = st.file_uploader("2. Sélectionner le portrait PNG transparent :", type=["png", "jpg", "jpeg"], key="upload_player_photo_file")
+            # --- ONGLET 1 : NOUVEL UPLOAD ---
+            with st.expander("📤 1. Uploader un nouveau portrait", expanded=True):
+                selected_player_to_link = st.selectbox("Choisir le joueur ou joker à associer :", options=all_linkable_players, key="select_player_photo_link")
+                
+                # Vérification warning si une photo existe déjà
+                target_has_photo = False
+                if selected_player_to_link in reg_list:
+                    p_val = st.session_state.players_df.loc[st.session_state.players_df["Nom du Joueur"] == selected_player_to_link, "Photo"].values[0]
+                    if pd.notna(p_val) and str(p_val).strip() != "":
+                        target_has_photo = True
+                elif selected_player_to_link.startswith("Joker "):
+                    j_name_clean = selected_player_to_link.replace("Joker ", "").strip()
+                    p_val = st.session_state.jokers_db.loc[st.session_state.jokers_db["Nom Joker"] == j_name_clean, "Photo"].values[0]
+                    if pd.notna(p_val) and str(p_val).strip() != "":
+                        target_has_photo = True
 
-            if uploaded_photo is not None:
-                if st.button("🔗 Enregistrer, lier et remplir l'Excel", key="btn_link_photo_submit", type="primary"):
-                    ext = os.path.splitext(uploaded_photo.name)[1].lower()
-                    clean_target_name = re.sub(r'^joker\s+', '', selected_player_to_link.strip().lower())
-                    file_id = get_player_id(clean_target_name)
-                    new_filename = f"{file_id}{ext}"
-                    target_photo_path = os.path.join(PHOTO_JOUEUR_DIR, new_filename)
-                    
-                    photo_bytes = uploaded_photo.getvalue()
-                    with open(target_photo_path, "wb") as f:
-                        f.write(photo_bytes)
-                    
-                    if selected_player_to_link in reg_list:
-                        idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == selected_player_to_link].index[0]
-                        st.session_state.players_df.loc[idx, "Photo"] = new_filename
-                        save_data(st.session_state.players_df)
-                        st.session_state.db_editor_version += 1
-                    elif selected_player_to_link.startswith("Joker "):
-                        joker_real_name = selected_player_to_link.replace("Joker ", "").strip()
-                        idx = st.session_state.jokers_db[st.session_state.jokers_db["Nom Joker"] == joker_real_name].index[0]
-                        st.session_state.jokers_db.loc[idx, "Photo"] = new_filename
-                        save_jokers_db(st.session_state.jokers_db)
-                        st.session_state.jokers_editor_version += 1
+                if target_has_photo:
+                    st.warning(f"⚠️ **Attention :** {selected_player_to_link} possède déjà un portrait associé ! L'uploarder va l'écraser.")
 
-                    push_file_to_github(target_photo_path, photo_bytes, f"Ajout portrait lié pour {selected_player_to_link}")
-                    st.success(f"✅ Portrait lié avec succès à **{selected_player_to_link}** !")
-                    st.rerun()
+                uploaded_photo = st.file_uploader("Sélectionner le portrait PNG transparent :", type=["png", "jpg", "jpeg"], key="upload_player_photo_file")
+
+                if uploaded_photo is not None:
+                    if st.button("🔗 Enregistrer, lier et remplir l'Excel", key="btn_link_photo_submit", type="primary"):
+                        ext = os.path.splitext(uploaded_photo.name)[1].lower()
+                        clean_target_name = re.sub(r'^joker\s+', '', selected_player_to_link.strip().lower())
+                        file_id = get_player_id(clean_target_name)
+                        new_filename = f"{file_id}{ext}"
+                        target_photo_path = os.path.join(PHOTO_JOUEUR_DIR, new_filename)
+                        
+                        photo_bytes = uploaded_photo.getvalue()
+                        with open(target_photo_path, "wb") as f:
+                            f.write(photo_bytes)
+                        
+                        if selected_player_to_link in reg_list:
+                            idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == selected_player_to_link].index[0]
+                            st.session_state.players_df.loc[idx, "Photo"] = new_filename
+                            save_data(st.session_state.players_df)
+                            st.session_state.db_editor_version += 1
+                        elif selected_player_to_link.startswith("Joker "):
+                            joker_real_name = selected_player_to_link.replace("Joker ", "").strip()
+                            idx = st.session_state.jokers_db[st.session_state.jokers_db["Nom Joker"] == joker_real_name].index[0]
+                            st.session_state.jokers_db.loc[idx, "Photo"] = new_filename
+                            save_jokers_db(st.session_state.jokers_db)
+                            st.session_state.jokers_editor_version += 1
+
+                        push_file_to_github(target_photo_path, photo_bytes, f"Ajout portrait lié pour {selected_player_to_link}")
+                        st.success(f"✅ Portrait lié avec succès à **{selected_player_to_link}** !")
+                        st.rerun()
+
+            # --- ONGLET 2 : RÉASSOCIATION D'UN PORTRAIT EXISTANT ---
+            with st.expander("🔄 2. Réassocier un portrait existant (sans ré-uploader)", expanded=False):
+                if os.path.exists(PHOTO_JOUEUR_DIR):
+                    existing_photo_files = [f for f in os.listdir(PHOTO_JOUEUR_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                    if existing_photo_files:
+                        selected_existing_photo = st.selectbox("Choisir le fichier image existant :", options=existing_photo_files, key="select_existing_photo_file")
+                        selected_new_owner = st.selectbox("Associer ce portrait au joueur / joker :", options=all_linkable_players, key="select_new_owner_dropdown")
+                        
+                        # Vérification warning pour la réassociation
+                        owner_has_photo = False
+                        if selected_new_owner in reg_list:
+                            o_val = st.session_state.players_df.loc[st.session_state.players_df["Nom du Joueur"] == selected_new_owner, "Photo"].values[0]
+                            if pd.notna(o_val) and str(o_val).strip() != "":
+                                owner_has_photo = True
+                        elif selected_new_owner.startswith("Joker "):
+                            j_name_c = selected_new_owner.replace("Joker ", "").strip()
+                            o_val = st.session_state.jokers_db.loc[st.session_state.jokers_db["Nom Joker"] == j_name_c, "Photo"].values[0]
+                            if pd.notna(o_val) and str(o_val).strip() != "":
+                                owner_has_photo = True
+
+                        if owner_has_photo:
+                            st.warning(f"⚠️ **Attention :** {selected_new_owner} possède déjà un portrait associé qui sera remplacé par cette réassociation.")
+
+                        if st.button("🔗 Valider la réassociation", key="btn_validate_reassociation", type="primary"):
+                            if selected_new_owner in reg_list:
+                                idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == selected_new_owner].index[0]
+                                st.session_state.players_df.loc[idx, "Photo"] = selected_existing_photo
+                                save_data(st.session_state.players_df)
+                                st.session_state.db_editor_version += 1
+                            elif selected_new_owner.startswith("Joker "):
+                                joker_real_name = selected_new_owner.replace("Joker ", "").strip()
+                                idx = st.session_state.jokers_db[st.session_state.jokers_db["Nom Joker"] == joker_real_name].index[0]
+                                st.session_state.jokers_db.loc[idx, "Photo"] = selected_existing_photo
+                                save_jokers_db(st.session_state.jokers_db)
+                                st.session_state.jokers_editor_version += 1
+
+                            st.success(f"✅ Portrait **{selected_existing_photo}** réassocié avec succès à **{selected_new_owner}** !")
+                            st.rerun()
+                    else:
+                        st.info("Aucun fichier image disponible sur le serveur.")
         else:
             st.warning("Veuillez d'abord créer des joueurs dans la base.")
 
         st.write("---")
-        st.markdown("##### 🗑️ Gestion des portraits existants (Supprimer / Remplacer)")
+        st.markdown("##### 🗑️ Gestion et suppression des portraits existants")
         if os.path.exists(PHOTO_JOUEUR_DIR):
             existing_photos = [f for f in os.listdir(PHOTO_JOUEUR_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
             if existing_photos:
