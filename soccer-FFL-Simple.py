@@ -572,10 +572,11 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
 
     w, h = card_img.size
 
-    # --- 1. INCRUSTATION DU MAILLOT & DU VISAGE ---
+    # --- 1. INCRUSTATION DU MAILLOT & DU VISAGE DÉTOURÉ ---
     photo_path = get_player_photo_path(player_name)
     if photo_path and os.path.exists(photo_path):
         try:
+            # 1. Pose du maillot
             jersey_path = get_matching_jersey(card_path)
             if jersey_path and os.path.exists(jersey_path):
                 with Image.open(jersey_path).convert("RGBA") as jersey_img:
@@ -589,19 +590,19 @@ def create_player_card(card_path, player_name, is_custom_fut=False, override_fon
                     paste_y = int(h * 0.38) - (jersey_resized.height // 2)
                     card_img.paste(jersey_resized, (paste_x, paste_y), jersey_resized)
 
+            # 2. Pose du visage (déjà détouré en ovale propre)
             with Image.open(photo_path).convert("RGBA") as photo_img:
-                max_photo_w = int(w * 0.75)
-                max_photo_h = int(h * 0.50)
-                
-                p_w, p_h = photo_img.size
-                ratio = min(max_photo_w / p_w, max_photo_h / p_h)
-                new_p_w = int(p_w * ratio)
-                new_p_h = int(p_h * ratio)
+                ph_w, ph_h = photo_img.size
+                max_photo_w = int(w * 0.60)
+                max_photo_h = int(h * 0.40)
+                ratio = min(max_photo_w / ph_w, max_photo_h / ph_h)
+                new_p_w = int(ph_w * ratio)
+                new_p_h = int(ph_h * ratio)
                 
                 photo_resized = photo_img.resize((new_p_w, new_p_h), Image.Resampling.LANCZOS)
                 
                 paste_x = (w - new_p_w) // 2
-                paste_y = int(h * 0.38) - (new_p_h // 2)
+                paste_y = int(h * 0.32) - (new_p_h // 2)
                 
                 card_img.paste(photo_resized, (paste_x, paste_y), photo_resized)
         except Exception:
@@ -1148,7 +1149,6 @@ with tab_font:
 
     if all_combined_names:
         selected_preview_player = st.selectbox("Sélectionner un joueur ou joker existant :", options=all_combined_names, key="preview_player_dropdown")
-        # Le nom personnalisé a été retiré ici, on utilise directement la sélection de la liste déroulante
         custom_preview_name = selected_preview_player
     else:
         custom_preview_name = "Antho"
@@ -1180,7 +1180,7 @@ with tab_font:
 # ==========================================
 with tab2:
     st.header("Gestion des Bases de Données & Liaison des Portraits")
-    subtab_players, subtab_jokers, subtab_photos = st.tabs(["📋 Base Joueurs", "🃏 Base Jokers", "📸 Liaison & Upload Portraits"])
+    subtab_players, subtab_jokers, subtab_photos = st.tabs(["📋 Base Joueurs", "🃏 Base Jokers", "📸 Recadrage & Liaison Portraits"])
     
     with subtab_players:
         with st.expander("➕ Ajouter un joueur"):
@@ -1213,100 +1213,108 @@ with tab2:
             st.rerun()
 
     with subtab_photos:
-        st.subheader("📸 Uploader, Lier ou Réassocier un portrait")
+        st.subheader("✂️ Outil de Recadrage Ovale (Visage uniquement)")
         
         reg_list = st.session_state.players_df["Nom du Joueur"].tolist() if not st.session_state.players_df.empty else []
         jok_list = [f"Joker {j}" for j in st.session_state.jokers_db["Nom Joker"].tolist()] if not st.session_state.jokers_db.empty and "Nom Joker" in st.session_state.jokers_db.columns else []
         all_linkable_players = sorted(list(set(reg_list + jok_list)))
 
         if all_linkable_players:
-            with st.expander("📤 1. Uploader un nouveau portrait", expanded=True):
-                selected_player_to_link = st.selectbox("Choisir le joueur ou joker à associer :", options=all_linkable_players, key="select_player_photo_link")
-                
-                target_has_photo = False
-                if selected_player_to_link in reg_list:
-                    p_val = st.session_state.players_df.loc[st.session_state.players_df["Nom du Joueur"] == selected_player_to_link, "Photo"].values[0]
-                    if pd.notna(p_val) and str(p_val).strip() != "":
-                        target_has_photo = True
-                elif selected_player_to_link.startswith("Joker "):
-                    j_name_clean = selected_player_to_link.replace("Joker ", "").strip()
-                    p_val = st.session_state.jokers_db.loc[st.session_state.jokers_db["Nom Joker"] == j_name_clean, "Photo"].values[0]
-                    if pd.notna(p_val) and str(p_val).strip() != "":
-                        target_has_photo = True
-
-                if target_has_photo:
-                    st.warning(f"⚠️ **Attention :** {selected_player_to_link} possède déjà un portrait associé ! L'uploarder va l'écraser.")
-
-                uploaded_photo = st.file_uploader("Sélectionner le portrait (PNG / JPG) :", type=["png", "jpg", "jpeg"], key="upload_player_photo_file")
-
-                if uploaded_photo is not None:
-                    if st.button("🔗 Enregistrer, lier et remplir l'Excel", key="btn_link_photo_submit", type="primary"):
-                        ext = os.path.splitext(uploaded_photo.name)[1].lower()
-                        clean_target_name = re.sub(r'^joker\s+', '', selected_player_to_link.strip().lower())
-                        file_id = get_player_id(clean_target_name)
-                        new_filename = f"{file_id}{ext}"
-                        target_photo_path = os.path.join(PHOTO_JOUEUR_DIR, new_filename)
-                        
-                        photo_bytes = uploaded_photo.getvalue()
-                        with open(target_photo_path, "wb") as f:
-                            f.write(photo_bytes)
-                        
-                        if selected_player_to_link in reg_list:
-                            idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == selected_player_to_link].index[0]
-                            st.session_state.players_df.loc[idx, "Photo"] = new_filename
-                            save_data(st.session_state.players_df)
-                            st.session_state.db_editor_version += 1
-                        elif selected_player_to_link.startswith("Joker "):
-                            joker_real_name = selected_player_to_link.replace("Joker ", "").strip()
-                            idx = st.session_state.jokers_db[st.session_state.jokers_db["Nom Joker"] == joker_real_name].index[0]
-                            st.session_state.jokers_db.loc[idx, "Photo"] = new_filename
-                            save_jokers_db(st.session_state.jokers_db)
-                            st.session_state.jokers_editor_version += 1
-
-                        push_file_to_github(target_photo_path, photo_bytes, f"Ajout portrait lié pour {selected_player_to_link}")
-                        st.success(f"✅ Portrait lié avec succès à **{selected_player_to_link}** !")
-                        st.rerun()
-
-            with st.expander("🔄 2. Réassocier un portrait existant (sans ré-uploader)", expanded=False):
+            selected_player_to_crop = st.selectbox("Choisir le joueur ou joker à cadrer :", options=all_linkable_players, key="select_player_crop_target")
+            
+            # Source de l'image : soit upload d'une nouvelle photo, soit sélection d'une photo existante
+            source_choice = st.radio("Source de l'image :", ["Uploader une nouvelle photo", "Utiliser une photo déjà sur le serveur"], horizontal=True, key="crop_source_radio")
+            
+            raw_img_to_process = None
+            orig_filename = ""
+            
+            if source_choice == "Uploader une nouvelle photo":
+                uploaded_crop_file = st.file_uploader("Sélectionner le portrait brut (PNG / JPG) :", type=["png", "jpg", "jpeg"], key="upload_crop_file")
+                if uploaded_crop_file:
+                    orig_filename = uploaded_crop_file.name
+                    raw_img_to_process = Image.open(uploaded_crop_file).convert("RGBA")
+            else:
                 if os.path.exists(PHOTO_JOUEUR_DIR):
-                    existing_photo_files = [f for f in os.listdir(PHOTO_JOUEUR_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-                    if existing_photo_files:
-                        selected_existing_photo = st.selectbox("Choisir le fichier image existant :", options=existing_photo_files, key="select_existing_photo_file")
-                        selected_new_owner = st.selectbox("Associer ce portrait au joueur / joker :", options=all_linkable_players, key="select_new_owner_dropdown")
-                        
-                        owner_has_photo = False
-                        if selected_new_owner in reg_list:
-                            o_val = st.session_state.players_df.loc[st.session_state.players_df["Nom du Joueur"] == selected_new_owner, "Photo"].values[0]
-                            if pd.notna(o_val) and str(o_val).strip() != "":
-                                owner_has_photo = True
-                        elif selected_new_owner.startswith("Joker "):
-                            j_name_c = selected_new_owner.replace("Joker ", "").strip()
-                            o_val = st.session_state.jokers_db.loc[st.session_state.jokers_db["Nom Joker"] == j_name_c, "Photo"].values[0]
-                            if pd.notna(o_val) and str(o_val).strip() != "":
-                                owner_has_photo = True
-
-                        if owner_has_photo:
-                            st.warning(f"⚠️ **Attention :** {selected_new_owner} possède déjà un portrait associé qui sera remplacé par cette réassociation.")
-
-                        if st.button("🔗 Valider la réassociation", key="btn_validate_reassociation", type="primary"):
-                            if selected_new_owner in reg_list:
-                                idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == selected_new_owner].index[0]
-                                st.session_state.players_df.loc[idx, "Photo"] = selected_existing_photo
-                                save_data(st.session_state.players_df)
-                                st.session_state.db_editor_version += 1
-                            elif selected_new_owner.startswith("Joker "):
-                                joker_real_name = selected_new_owner.replace("Joker ", "").strip()
-                                idx = st.session_state.jokers_db[st.session_state.jokers_db["Nom Joker"] == joker_real_name].index[0]
-                                st.session_state.jokers_db.loc[idx, "Photo"] = selected_existing_photo
-                                save_jokers_db(st.session_state.jokers_db)
-                                st.session_state.jokers_editor_version += 1
-
-                            st.success(f"✅ Portrait **{selected_existing_photo}** réassocié avec succès à **{selected_new_owner}** !")
-                            st.rerun()
+                    existing_server_photos = [f for f in os.listdir(PHOTO_JOUEUR_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                    if existing_server_photos:
+                        selected_srv_photo = st.selectbox("Choisir le fichier sur le serveur :", options=existing_server_photos, key="select_srv_photo_crop")
+                        orig_filename = selected_srv_photo
+                        raw_img_to_process = Image.open(os.path.join(PHOTO_JOUEUR_DIR, selected_srv_photo)).convert("RGBA")
                     else:
-                        st.info("Aucun fichier image disponible sur le serveur.")
-        else:
-            st.warning("Veuillez d'abord créer des joueurs dans la base.")
+                        st.info("Aucune photo disponible sur le serveur.")
+
+            if raw_img_to_process:
+                st.write("---")
+                st.markdown("##### 🎚️ Ajustement du cadre ovale (Visage)")
+                img_w, img_h = raw_img_to_process.size
+                
+                col_sliders, col_preview_crop = st.columns([1, 1])
+                with col_sliders:
+                    crop_center_x = st.slider("Position horizontale (Centre X)", min_value=0, max_value=img_w, value=img_w // 2, key="slider_crop_cx")
+                    crop_center_y = st.slider("Position verticale (Centre Y - Visage)", min_value=0, max_value=img_h, value=int(img_h * 0.38), key="slider_crop_cy")
+                    crop_radius_x = st.slider("Largeur de l'ovale", min_value=20, max_value=img_w // 2, value=int(img_w * 0.30), key="slider_crop_rx")
+                    crop_radius_y = st.slider("Hauteur de l'ovale", min_value=20, max_value=img_h // 2, value=int(img_h * 0.35), key="slider_crop_ry")
+
+                # Génération de l'aperçu en temps réel avec l'ovale dessiné par-dessus
+                preview_img = raw_img_to_process.copy()
+                draw_prev = ImageDraw.Draw(preview_img)
+                box_coords = [
+                    crop_center_x - crop_radius_x,
+                    crop_center_y - crop_radius_y,
+                    crop_center_x + crop_radius_x,
+                    crop_center_y + crop_radius_y
+                ]
+                draw_prev.ellipse(box_coords, outline="lime", width=5)
+
+                with col_preview_crop:
+                    st.image(preview_img, caption="Aperçu du cadrage (le contour vert = l'ovale conservé)", use_container_width=True)
+
+                if st.button("✂️ Valider et Enregistrer ce portrait propre", type="primary", key="btn_validate_crop"):
+                    # Création du masque ovale
+                    mask = Image.new("L", (img_w, img_h), 0)
+                    draw_mask = ImageDraw.Draw(mask)
+                    draw_mask.ellipse(box_coords, fill=255)
+                    
+                    # Découpage et application de la transparence
+                    cropped_face = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
+                    cropped_face.paste(raw_img_to_process, (0, 0))
+                    cropped_face.putalpha(mask)
+                    
+                    # On rogne serré autour de l'ovale pour un fichier propre
+                    bbox = mask.getbbox()
+                    if bbox:
+                        cropped_face = cropped_face.crop(bbox)
+
+                    # Sauvegarde finale
+                    clean_target_name = re.sub(r'^joker\s+', '', selected_player_to_crop.strip().lower())
+                    file_id = get_player_id(clean_target_name)
+                    ext = ".png" # On sauvegarde en PNG transparent
+                    new_filename = f"{file_id}{ext}"
+                    target_photo_path = os.path.join(PHOTO_JOUEUR_DIR, new_filename)
+                    
+                    buf_save = io.BytesIO()
+                    cropped_face.save(buf_save, format="PNG")
+                    photo_bytes = buf_save.getvalue()
+                    
+                    with open(target_photo_path, "wb") as f:
+                        f.write(photo_bytes)
+                    
+                    # Liaison avec le joueur ou joker dans la base
+                    if selected_player_to_crop in reg_list:
+                        idx = st.session_state.players_df[st.session_state.players_df["Nom du Joueur"] == selected_player_to_crop].index[0]
+                        st.session_state.players_df.loc[idx, "Photo"] = new_filename
+                        save_data(st.session_state.players_df)
+                        st.session_state.db_editor_version += 1
+                    elif selected_player_to_crop.startswith("Joker "):
+                        joker_real_name = selected_player_to_crop.replace("Joker ", "").strip()
+                        idx = st.session_state.jokers_db[st.session_state.jokers_db["Nom Joker"] == joker_real_name].index[0]
+                        st.session_state.jokers_db.loc[idx, "Photo"] = new_filename
+                        save_jokers_db(st.session_state.jokers_db)
+                        st.session_state.jokers_editor_version += 1
+
+                    push_file_to_github(target_photo_path, photo_bytes, f"Mise à jour portrait recadré pour {selected_player_to_crop}")
+                    st.success(f"✅ Portrait recadré et lié avec succès à **{selected_player_to_crop** !")
+                    st.rerun()
 
         st.write("---")
         st.markdown("##### 🗑️ Gestion et suppression des portraits existants")
