@@ -61,6 +61,70 @@ def sync_all_previews():
         if os.path.exists(default_c):
             resize_and_save_preview(default_c)
 
+# --- GESTION DES JOUEURS & PHOTOS ---
+def get_player_id(player_name: str) -> str:
+    clean = re.sub(r'[^a-zA-Z0-9]', '_', str(player_name).strip().lower())
+    return re.sub(r'_+', '_', clean).strip('_')
+
+def get_player_photo_path(player_name: str) -> str:
+    if not player_name:
+        return None
+    clean_name = re.sub(r'^joker\s+', '', str(player_name).strip().lower())
+    pid = get_player_id(clean_name)
+    
+    for ext in ['.png', '.jpg', '.jpeg']:
+        path = os.path.join(PHOTO_JOUEUR_DIR, f"{pid}{ext}")
+        if os.path.exists(path):
+            return path
+        path_raw = os.path.join(PHOTO_JOUEUR_DIR, f"{get_player_id(player_name)}{ext}")
+        if os.path.exists(path_raw):
+            return path_raw
+    return None
+
+def text_to_score(val):
+    if pd.isna(val):
+        return 5
+    match = re.search(r'\d+', str(val))
+    if match:
+        return max(1, min(10, int(match.group())))
+    return 5
+
+def calculate_global_score(row):
+    att = text_to_score(row.get("Attaque", 5))
+    defe = text_to_score(row.get("Défense", 5))
+    gk = text_to_score(row.get("Gardien", 1))
+    col = text_to_score(row.get("Collectif", 5))
+    avg = (att + defe + gk + col) / 4.0
+    return round(avg, 1)
+
+def get_card_generation(filename):
+    base = os.path.basename(filename).lower()
+    match = re.search(r'(fut[-]?\d+|fifa[-]?\d+|toty[-]?\d+|tots[-]?\d+|hero[-]?\d+)', base)
+    if match:
+        return match.group(1)
+    parts = re.split(r'[-_]', base)
+    return parts[0] if len(parts) > 0 else 'default'
+
+def get_available_cards_list():
+    available_cards = []
+    if os.path.exists(CARTE_FUT_DIR):
+        available_cards = [os.path.join(CARTE_FUT_DIR, f) for f in os.listdir(CARTE_FUT_DIR) if f.lower().endswith('.png')]
+    for default_c in ['card_blue.png', 'card_red.png', 'card_yellow.png']:
+        if os.path.exists(default_c) and default_c not in available_cards:
+            available_cards.append(default_c)
+    if not available_cards:
+        available_cards = ['card_blue.png', 'card_red.png', 'card_yellow.png']
+    return available_cards
+
+def get_preview_card_path(full_card_path):
+    filename = os.path.basename(full_card_path)
+    prev_path = os.path.join(CARTE_FUT_PREV_DIR, filename)
+    if os.path.exists(prev_path):
+        return prev_path
+    elif os.path.exists(full_card_path):
+        return resize_and_save_preview(full_card_path)
+    return full_card_path
+
 sync_all_previews()
 
 # --- 1. CHARGEMENT DE L'ICÔNE ---
@@ -247,70 +311,6 @@ def push_file_to_github(file_path: str, content_bytes: bytes, commit_message: st
     except Exception as e:
         st.error(f"❌ Erreur synchronisation GitHub ({file_path}) : {e}")
         return False
-
-# --- GESTION DES JOUEURS & PHOTOS ---
-def get_player_id(player_name: str) -> str:
-    clean = re.sub(r'[^a-zA-Z0-9]', '_', str(player_name).strip().lower())
-    return re.sub(r'_+', '_', clean).strip('_')
-
-def get_player_photo_path(player_name: str) -> str:
-    if not player_name:
-        return None
-    clean_name = re.sub(r'^joker\s+', '', str(player_name).strip().lower())
-    pid = get_player_id(clean_name)
-    
-    for ext in ['.png', '.jpg', '.jpeg']:
-        path = os.path.join(PHOTO_JOUEUR_DIR, f"{pid}{ext}")
-        if os.path.exists(path):
-            return path
-        path_raw = os.path.join(PHOTO_JOUEUR_DIR, f"{get_player_id(player_name)}{ext}")
-        if os.path.exists(path_raw):
-            return path_raw
-    return None
-
-def text_to_score(val):
-    if pd.isna(val):
-        return 5
-    match = re.search(r'\d+', str(val))
-    if match:
-        return max(1, min(10, int(match.group())))
-    return 5
-
-def calculate_global_score(row):
-    att = text_to_score(row.get("Attaque", 5))
-    defe = text_to_score(row.get("Défense", 5))
-    gk = text_to_score(row.get("Gardien", 1))
-    col = text_to_score(row.get("Collectif", 5))
-    avg = (att + defe + gk + col) / 4.0
-    return round(avg, 1)
-
-def get_card_generation(filename):
-    base = os.path.basename(filename).lower()
-    match = re.search(r'(fut[-]?\d+|fifa[-]?\d+|toty[-]?\d+|tots[-]?\d+|hero[-]?\d+)', base)
-    if match:
-        return match.group(1)
-    parts = re.split(r'[-_]', base)
-    return parts[0] if len(parts) > 0 else 'default'
-
-def get_available_cards_list():
-    available_cards = []
-    if os.path.exists(CARTE_FUT_DIR):
-        available_cards = [os.path.join(CARTE_FUT_DIR, f) for f in os.listdir(CARTE_FUT_DIR) if f.lower().endswith('.png')]
-    for default_c in ['card_blue.png', 'card_red.png', 'card_yellow.png']:
-        if os.path.exists(default_c) and default_c not in available_cards:
-            available_cards.append(default_c)
-    if not available_cards:
-        available_cards = ['card_blue.png', 'card_red.png', 'card_yellow.png']
-    return available_cards
-
-def get_preview_card_path(full_card_path):
-    filename = os.path.basename(full_card_path)
-    prev_path = os.path.join(CARTE_FUT_PREV_DIR, filename)
-    if os.path.exists(prev_path):
-        return prev_path
-    elif os.path.exists(full_card_path):
-        return resize_and_save_preview(full_card_path)
-    return full_card_path
 
 # --- CHARGEMENT / SAUVEGARDE BASE JOUEURS ---
 def load_data():
@@ -940,6 +940,33 @@ with tab1:
             't2': st.session_state.get('global_card_t2', 'card_red.png'),
             'joker': st.session_state.get('global_card_joker', 'card_yellow.png')
         }
+
+    # --- PRÉVISUALISATION EN TEMPS RÉEL ---
+    st.markdown("##### 👁️ Aperçu en direct des cartes sélectionnées pour le match :")
+    preview_name_tab1 = all_match_names[0] if all_match_names else "Antho"
+    preview_font_path = st.session_state.get('active_font_path', DEFAULT_FONT_PATH)
+
+    prev_cols = st.columns(3)
+    cards_preview_meta = [
+        ("🔵 Équipe 1", main_override_cards['t1'] if main_override_cards else 'card_blue.png'),
+        ("🔴 Équipe 2", main_override_cards['t2'] if main_override_cards else 'card_red.png'),
+        ("🃏 Jokers", main_override_cards['joker'] if main_override_cards else 'card_yellow.png')
+    ]
+
+    for idx_p, (c_label, c_path) in enumerate(cards_preview_meta):
+        with prev_cols[idx_p]:
+            st.caption(f"**{c_label}**")
+            prev_file_path = get_preview_card_path(c_path)
+            if os.path.exists(prev_file_path):
+                img_prev = create_player_card(prev_file_path, preview_name_tab1, is_custom_fut=False, override_font_path=preview_font_path)
+                if img_prev:
+                    st.image(img_prev, use_container_width=False)
+                else:
+                    st.warning("Erreur rendu")
+            else:
+                st.info("Introuvable")
+
+    st.write("---")
 
     if st.button("⚡ Générer l'Équilibrage Parfait", key="btn_generate_teams_tab1", type="primary"):
         if total_players_count != 10:
