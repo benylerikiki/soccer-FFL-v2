@@ -99,7 +99,7 @@ def calculate_global_score(row):
 
 def get_card_generation(filename):
     base = os.path.basename(filename).lower()
-    match = re.search(r'(fut[-]?\d+|fifa[-]?\d+|toty[-]?\d+|tots[-]?\d+|hero[-]?\d+)', base)
+    match = re.search(r'(fut[-]?\d+|fifa[-]?\d+|toty[-]?\d+|tots[-]?\d+|hero[-]?\d+|fc[-]?\d+)', base)
     if match:
         return match.group(1)
     parts = re.split(r'[-_]', base)
@@ -930,10 +930,35 @@ with tab1:
     main_override_cards = None
     if not main_use_default_cards:
         available_cards_list = get_available_cards_list()
-        mc_t1 = st.selectbox("Carte Équipe 1 :", options=available_cards_list, key="match_sel_t1_card")
-        mc_t2 = st.selectbox("Carte Équipe 2 :", options=available_cards_list, key="match_sel_t2_card")
-        mc_joker = st.selectbox("Carte Jokers :", options=available_cards_list, key="match_sel_joker_card")
-        main_override_cards = {'t1': mc_t1, 't2': mc_t2, 'joker': mc_joker}
+        main_card_mode = st.radio("Mode de sélection des cartes :", ["Manuel (Équipe par Équipe)", "Aléatoire complet (Génération FUT / FC)"], key="main_card_mode_select")
+        
+        if main_card_mode == "Manuel (Équipe par Équipe)":
+            mc_t1 = st.selectbox("Carte Équipe 1 :", options=available_cards_list, key="match_sel_t1_card")
+            mc_t2 = st.selectbox("Carte Équipe 2 :", options=available_cards_list, key="match_sel_t2_card")
+            mc_joker = st.selectbox("Carte Jokers :", options=available_cards_list, key="match_sel_joker_card")
+            main_override_cards = {'t1': mc_t1, 't2': mc_t2, 'joker': mc_joker}
+        else:
+            generations = {}
+            for c_path in available_cards_list:
+                gen = get_card_generation(c_path)
+                generations.setdefault(gen, []).append(c_path)
+            selected_gen_main = st.selectbox("Série homogène / Génération :", options=list(generations.keys()), key="main_sel_gen")
+            
+            if 'main_random_override' not in st.session_state:
+                import random
+                g_cards = generations[selected_gen_main]
+                st.session_state['main_random_override'] = {'t1': random.choice(g_cards), 't2': random.choice(g_cards), 'joker': random.choice(g_cards)}
+            
+            if st.button("🎲 Tirer un nouveau pack aléatoire", key="main_btn_rnd_gen"):
+                import random
+                g_cards = generations[selected_gen_main]
+                st.session_state['main_random_override'] = {
+                    't1': random.choice(g_cards),
+                    't2': random.choice(g_cards),
+                    'joker': random.choice(g_cards)
+                }
+                st.rerun()
+            main_override_cards = st.session_state.get('main_random_override', None)
     else:
         main_override_cards = {
             't1': st.session_state.get('global_card_t1', 'card_blue.png'),
@@ -941,9 +966,9 @@ with tab1:
             'joker': st.session_state.get('global_card_joker', 'card_yellow.png')
         }
 
-    # --- PRÉVISUALISATION EN TEMPS RÉEL ---
+    # --- PRÉVISUALISATION EN TEMPS RÉEL AVEC PERSONNALISATION DU PRÉNOM ---
     st.markdown("##### 👁️ Aperçu en direct des cartes sélectionnées pour le match :")
-    preview_name_tab1 = all_match_names[0] if all_match_names else "Antho"
+    preview_name_tab1 = st.text_input("Modifier le prénom affiché sur l'aperçu :", value=all_match_names[0] if all_match_names else "Antho", key="preview_custom_name_input")
     preview_font_path = st.session_state.get('active_font_path', DEFAULT_FONT_PATH)
 
     prev_cols = st.columns(3)
@@ -1037,15 +1062,32 @@ with tab_font:
 
     with col_f2:
         available_cards = get_available_cards_list()
-        sel_t1 = st.selectbox("Carte Équipe 1 :", options=available_cards, key="global_sel_team1_card")
-        sel_t2 = st.selectbox("Carte Équipe 2 :", options=available_cards, key="global_sel_team2_card")
-        sel_joker = st.selectbox("Carte Jokers :", options=available_cards, key="global_sel_joker_card")
-        if st.button("💾 Assigner les cartes globales", key="btn_assign_global_cards"):
-            st.session_state['global_card_t1'] = sel_t1
-            st.session_state['global_card_t2'] = sel_t2
-            st.session_state['global_card_joker'] = sel_joker
-            st.success("✅ Enregistré !")
-            st.rerun()
+        card_mode_global = st.radio("Mode d'attribution global :", ["Manuel", "Aléatoire par Génération FUT/FC"], key="card_mode_global_radio")
+
+        if card_mode_global == "Manuel":
+            sel_t1 = st.selectbox("Carte Équipe 1 :", options=available_cards, key="global_sel_team1_card")
+            sel_t2 = st.selectbox("Carte Équipe 2 :", options=available_cards, key="global_sel_team2_card")
+            sel_joker = st.selectbox("Carte Jokers :", options=available_cards, key="global_sel_joker_card")
+            if st.button("💾 Assigner les cartes globales", key="btn_assign_global_cards"):
+                st.session_state['global_card_t1'] = sel_t1
+                st.session_state['global_card_t2'] = sel_t2
+                st.session_state['global_card_joker'] = sel_joker
+                st.success("✅ Enregistré !")
+                st.rerun()
+        else:
+            generations = {}
+            for c_path in available_cards:
+                gen = get_card_generation(c_path)
+                generations.setdefault(gen, []).append(c_path)
+            selected_gen_global = st.selectbox("Choisir la génération / série homogène :", options=list(generations.keys()), key="global_gen_select")
+            if st.button("🎲 Tirer un pack aléatoire global de cette génération", key="btn_random_global_gen", type="primary"):
+                import random
+                g_cards = generations[selected_gen_global]
+                st.session_state['global_card_t1'] = random.choice(g_cards)
+                st.session_state['global_card_t2'] = random.choice(g_cards)
+                st.session_state['global_card_joker'] = random.choice(g_cards)
+                st.success(f"✅ Pack aléatoire de la génération **{selected_gen_global}** appliqué !")
+                st.rerun()
 
 # ==========================================
 # 🏃 TAB 2 : GESTION DES BASES & PHOTOS
